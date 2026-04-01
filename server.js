@@ -617,8 +617,8 @@ app.post('/api/auth/login', (req, res) => {
       return res.status(400).json({ ok: false, error: 'Email and password are required' });
     }
     const emailLower = email.trim().toLowerCase();
-    // Validate email format
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailLower)) {
+    // Validate email format (simple check — avoid complex regex to prevent ReDoS)
+    if (emailLower.length > 254 || !emailLower.includes('@') || emailLower.indexOf('@') === 0 || emailLower.endsWith('@')) {
       return res.status(400).json({ ok: false, error: 'Invalid email format' });
     }
     if (!project_id) {
@@ -1390,19 +1390,26 @@ app.post('/api/bills/:sl/files', (req, res) => {
     const diskFilename = `${Date.now()}_${safeFilename}`;
     const filePath     = path.join(uploadDir, diskFilename);
 
+    // Verify the resolved path stays within the upload directory (path injection guard)
+    const resolvedPath = path.resolve(filePath);
+    const resolvedDir  = path.resolve(uploadDir);
+    if (!resolvedPath.startsWith(resolvedDir + path.sep)) {
+      return res.status(400).json({ ok: false, error: 'Invalid file path' });
+    }
+
     const base64 = data.includes(',') ? data.split(',')[1] : data;
     const buffer = Buffer.from(base64, 'base64');
-    fs.writeFileSync(filePath, buffer);
+    fs.writeFileSync(resolvedPath, buffer);
 
     // Store metadata in DB (no raw base64 data — just the path)
     run(`INSERT INTO bill_files (sl,name,size,type,data,file_path,uploaded_by) VALUES (?,?,?,?,?,?,?)`,
-      [sl, name, buffer.length, type||'', '', filePath, uploaded_by||'']);
+      [sl, name, buffer.length, type||'', '', resolvedPath, uploaded_by||'']);
     const id = query('SELECT last_insert_rowid() as id')[0].id;
     saveDb();
 
     const sizeKB = Math.round(buffer.length / 1024);
     console.log(`[Upload] SL#${sl} → ${diskFilename} (${sizeKB}KB) by ${uploaded_by||'unknown'}`);
-    res.json({ ok: true, id, file_path: filePath, size: buffer.length, filename: diskFilename });
+    res.json({ ok: true, id, file_path: resolvedPath, size: buffer.length, filename: diskFilename });
   } catch (err) {
     console.error('file upload:', err.message);
     res.status(500).json({ ok: false, error: err.message });
