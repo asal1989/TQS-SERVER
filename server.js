@@ -1273,7 +1273,8 @@ app.post('/api/clear-all', (req, res) => {
 // POST /api/bills/:sl/files — upload file → saved to disk + metadata in DB
 app.post('/api/bills/:sl/files', createRateLimiter(60 * 1000, 20), (req, res) => {
   try {
-    const { sl } = req.params;
+    // Sanitize sl to a positive integer to prevent path injection via req.params
+    const sl = String(Math.abs(parseInt(req.params.sl, 10) || 0));
     const { name, size, type, data, uploaded_by } = req.body;
     if (!name || !data) return res.status(400).json({ ok: false, error: 'name and data required' });
 
