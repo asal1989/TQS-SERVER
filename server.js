@@ -844,9 +844,11 @@ app.post('/api/bills', (req, res) => {
 
     // Duplicate invoice number check — skip if ?force=1
     if (d.inv_number && d.inv_number.trim() && req.query.force !== '1') {
+      const normInv = d.inv_number.trim().toLowerCase();
+      const normVendor = (d.vendor || '').trim().toLowerCase();
       const dup = query(
-        'SELECT sl FROM bills WHERE LOWER(TRIM(inv_number))=LOWER(TRIM(?)) AND LOWER(TRIM(vendor))=LOWER(TRIM(?)) AND is_deleted=0',
-        [d.inv_number, d.vendor]
+        'SELECT sl FROM bills WHERE LOWER(TRIM(inv_number))=? AND LOWER(TRIM(vendor))=? AND is_deleted=0',
+        [normInv, normVendor]
       );
       if (dup.length) {
         return res.status(409).json({
