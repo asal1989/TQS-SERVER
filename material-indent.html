@@ -1,0 +1,1026 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Material Indent — BuildPro</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #F5F3EF;
+    --surface: #FFFFFF;
+    --surface2: #F0EDE8;
+    --border: #E2DDD6;
+    --border-strong: #C8C2B8;
+    --text: #1C1A17;
+    --text-2: #6B6560;
+    --text-3: #A09A93;
+    --accent: #C17B3A;
+    --accent-bg: #FDF3E7;
+    --accent-border: #E8C49A;
+    --blue: #2D6FA8;
+    --blue-bg: #EEF4FB;
+    --blue-border: #A8C8E8;
+    --green: #2A7A4B;
+    --green-bg: #EBF5EF;
+    --green-border: #9DD4B3;
+    --red: #B83A3A;
+    --red-bg: #FBEEEE;
+    --red-border: #E8AAAA;
+    --warning: #8A6A1A;
+    --warning-bg: #FBF5E6;
+    --warning-border: #DFC88A;
+    --radius: 10px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+  }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* Layout */
+  .layout { display: flex; min-height: 100vh; }
+
+  /* Sidebar */
+  .sidebar {
+    width: 240px; min-width: 240px;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    position: fixed; top: 0; left: 0; bottom: 0;
+    z-index: 10;
+  }
+  .sidebar-logo {
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .logo-tag { font-size: 10px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); }
+  .logo-name { font-size: 18px; font-weight: 600; color: var(--text); margin-top: 2px; }
+  .logo-dot { color: var(--accent); }
+
+  .sidebar-nav { flex: 1; padding: 12px 10px; overflow-y: auto; }
+  .nav-group-label { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); padding: 10px 10px 4px; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 10px; border-radius: var(--radius-sm);
+    font-size: 13px; font-weight: 400; color: var(--text-2);
+    cursor: pointer; transition: all 0.15s; margin-bottom: 1px;
+    text-decoration: none;
+  }
+  .nav-item:hover { background: var(--surface2); color: var(--text); }
+  .nav-item.active { background: var(--accent-bg); color: var(--accent); font-weight: 500; }
+  .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.7; }
+  .nav-item.active svg { opacity: 1; }
+  .nav-badge {
+    margin-left: auto; font-size: 10px; font-weight: 600;
+    background: var(--red-bg); color: var(--red);
+    border-radius: 10px; padding: 1px 7px; font-family: 'DM Mono', monospace;
+  }
+  .nav-badge.amber { background: var(--warning-bg); color: var(--warning); }
+
+  .sidebar-footer {
+    padding: 14px 16px; border-top: 1px solid var(--border);
+  }
+  .user-row { display: flex; align-items: center; gap: 10px; }
+  .user-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    background: var(--accent-bg); border: 1px solid var(--accent-border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 600; color: var(--accent); flex-shrink: 0;
+  }
+  .user-name { font-size: 13px; font-weight: 500; color: var(--text); }
+  .user-role { font-size: 11px; color: var(--text-3); }
+  .project-pill {
+    display: flex; align-items: center; gap: 6px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 20px; padding: 4px 10px 4px 8px;
+    font-size: 11px; color: var(--text-2); margin-top: 10px; cursor: pointer;
+  }
+  .project-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+
+  /* Main */
+  .main { margin-left: 240px; flex: 1; display: flex; flex-direction: column; }
+
+  /* Topbar */
+  .topbar {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 14px 28px; display: flex; align-items: center; gap: 14px;
+    position: sticky; top: 0; z-index: 5;
+  }
+  .topbar-breadcrumb { display: flex; align-items: center; gap: 6px; flex: 1; }
+  .bc-link { font-size: 13px; color: var(--text-3); cursor: pointer; }
+  .bc-link:hover { color: var(--text-2); }
+  .bc-sep { color: var(--text-3); font-size: 12px; }
+  .bc-current { font-size: 13px; font-weight: 500; color: var(--text); }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500;
+    padding: 8px 16px; border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong); background: var(--surface);
+    color: var(--text); cursor: pointer; transition: all 0.15s; white-space: nowrap;
+  }
+  .btn:hover { background: var(--surface2); }
+  .btn-primary { background: var(--text); color: var(--surface); border-color: var(--text); }
+  .btn-primary:hover { background: #333; border-color: #333; }
+  .btn-accent { background: var(--accent); color: white; border-color: var(--accent); }
+  .btn-accent:hover { background: #a86830; border-color: #a86830; }
+  .btn-ghost { border-color: transparent; background: transparent; }
+  .btn-ghost:hover { background: var(--surface2); }
+  .btn svg { width: 14px; height: 14px; }
+
+  /* Content */
+  .content { padding: 28px; flex: 1; }
+
+  /* Page header */
+  .page-header { margin-bottom: 24px; }
+  .page-title { font-size: 22px; font-weight: 600; color: var(--text); }
+  .page-sub { font-size: 13px; color: var(--text-2); margin-top: 3px; }
+
+  /* Stats row */
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px 18px;
+    box-shadow: var(--shadow);
+  }
+  .stat-label { font-size: 11px; font-weight: 500; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+  .stat-value { font-size: 26px; font-weight: 600; color: var(--text); margin-top: 4px; font-family: 'DM Mono', monospace; }
+  .stat-sub { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+  .stat-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; }
+
+  /* Tabs */
+  .tab-row { display: flex; gap: 0; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+  .tab {
+    font-size: 13px; font-weight: 500; padding: 9px 16px;
+    color: var(--text-3); cursor: pointer;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+    transition: color 0.15s;
+  }
+  .tab:hover { color: var(--text-2); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-count { font-size: 11px; font-family: 'DM Mono', monospace; margin-left: 5px; background: var(--surface2); border-radius: 8px; padding: 1px 6px; color: var(--text-3); }
+  .tab.active .tab-count { background: var(--accent-bg); color: var(--accent); }
+
+  /* Toolbar */
+  .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .search-wrap { flex: 1; position: relative; max-width: 320px; }
+  .search-wrap svg { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--text-3); pointer-events: none; }
+  .search-input {
+    width: 100%; padding: 8px 12px 8px 32px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-family: 'DM Sans', sans-serif; font-size: 13px;
+    color: var(--text); background: var(--surface);
+    outline: none; transition: border-color 0.15s;
+  }
+  .search-input:focus { border-color: var(--accent); }
+  .search-input::placeholder { color: var(--text-3); }
+  .filter-btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; font-weight: 500; color: var(--text-2);
+    padding: 7px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); background: var(--surface);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .filter-btn:hover { background: var(--surface2); }
+  .filter-btn.active-filter { border-color: var(--accent); color: var(--accent); background: var(--accent-bg); }
+  .filter-btn svg { width: 13px; height: 13px; }
+
+  /* Table */
+  .table-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow);
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead { background: var(--surface2); }
+  th {
+    text-align: left; padding: 11px 14px;
+    font-size: 11px; font-weight: 600; color: var(--text-3);
+    letter-spacing: 0.06em; text-transform: uppercase;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  th:first-child { padding-left: 18px; }
+  td { padding: 13px 14px; border-bottom: 1px solid var(--border); color: var(--text); vertical-align: middle; }
+  td:first-child { padding-left: 18px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #FAFAF8; }
+  .td-mono { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text-2); }
+  .td-bold { font-weight: 500; }
+
+  /* Badges */
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 500;
+    padding: 3px 9px; border-radius: 20px;
+  }
+  .badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+  .badge-pending { background: var(--warning-bg); color: var(--warning); border: 1px solid var(--warning-border); }
+  .badge-pending::before { background: var(--warning); }
+  .badge-approved { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+  .badge-approved::before { background: var(--green); }
+  .badge-rejected { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+  .badge-rejected::before { background: var(--red); }
+  .badge-po { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
+  .badge-po::before { background: var(--blue); }
+
+  .priority-badge {
+    font-size: 10px; font-weight: 600; letter-spacing: 0.04em;
+    padding: 2px 8px; border-radius: 4px; text-transform: uppercase;
+  }
+  .pri-high { background: var(--red-bg); color: var(--red); }
+  .pri-medium { background: var(--warning-bg); color: var(--warning); }
+  .pri-low { background: var(--surface2); color: var(--text-3); }
+
+  /* Row actions */
+  .row-actions { display: flex; gap: 6px; opacity: 0; transition: opacity 0.15s; }
+  tr:hover .row-actions { opacity: 1; }
+  .row-btn {
+    font-size: 11px; font-weight: 500; padding: 4px 10px;
+    border-radius: 4px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text-2);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .row-btn:hover { background: var(--surface2); color: var(--text); }
+  .row-btn.approve { border-color: var(--green-border); color: var(--green); background: var(--green-bg); }
+  .row-btn.approve:hover { background: #d4eddc; }
+  .row-btn.reject { border-color: var(--red-border); color: var(--red); background: var(--red-bg); }
+  .row-btn.reject:hover { background: #f5d8d8; }
+
+  /* Empty state */
+  .empty-state { text-align: center; padding: 60px 20px; }
+  .empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+  .empty-title { font-size: 15px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; }
+  .empty-sub { font-size: 13px; color: var(--text-3); }
+
+  /* Modal overlay */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(28,26,23,0.45);
+    z-index: 100; display: none; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .overlay.open { display: flex; }
+
+  /* Modal */
+  .modal {
+    background: var(--surface); border-radius: 14px;
+    width: 100%; max-width: 580px; max-height: 90vh;
+    overflow-y: auto; box-shadow: var(--shadow-md);
+    animation: slideUp 0.2s ease;
+  }
+  @keyframes slideUp { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+
+  .modal-header {
+    padding: 22px 24px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; justify-content: space-between;
+    position: sticky; top: 0; background: var(--surface); z-index: 1;
+  }
+  .modal-title { font-size: 16px; font-weight: 600; color: var(--text); }
+  .modal-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+  .modal-close {
+    width: 28px; height: 28px; border-radius: 6px;
+    border: 1px solid var(--border); background: transparent;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    color: var(--text-3); font-size: 16px; transition: all 0.15s; flex-shrink: 0;
+  }
+  .modal-close:hover { background: var(--surface2); color: var(--text); }
+  .modal-body { padding: 22px 24px; }
+  .modal-footer {
+    padding: 16px 24px; border-top: 1px solid var(--border);
+    display: flex; gap: 10px; justify-content: flex-end;
+    position: sticky; bottom: 0; background: var(--surface);
+  }
+
+  /* Form */
+  .form-section { margin-bottom: 22px; }
+  .form-section-title { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-row.full { grid-template-columns: 1fr; }
+  .form-row.three { grid-template-columns: 1fr 1fr 1fr; }
+  .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 14px; }
+  .form-label { font-size: 12px; font-weight: 500; color: var(--text-2); }
+  .form-label span { color: var(--red); margin-left: 2px; }
+  .form-input, .form-select, .form-textarea {
+    padding: 9px 12px; border: 1px solid var(--border);
+    border-radius: var(--radius-sm); font-family: 'DM Sans', sans-serif;
+    font-size: 13px; color: var(--text); background: var(--surface);
+    outline: none; transition: border-color 0.15s; width: 100%;
+  }
+  .form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(193,123,58,0.1); }
+  .form-input::placeholder, .form-textarea::placeholder { color: var(--text-3); }
+  .form-textarea { resize: vertical; min-height: 72px; }
+  .form-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23A09A93' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; cursor: pointer; }
+  .form-hint { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+
+  /* Priority selector */
+  .priority-group { display: flex; gap: 8px; }
+  .pri-opt { display: none; }
+  .pri-label {
+    flex: 1; text-align: center; padding: 8px 10px;
+    border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-size: 12px; font-weight: 500; color: var(--text-2);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .pri-opt:checked + .pri-label.high { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
+  .pri-opt:checked + .pri-label.medium { background: var(--warning-bg); color: var(--warning); border-color: var(--warning-border); }
+  .pri-opt:checked + .pri-label.low { background: var(--surface2); color: var(--text-2); border-color: var(--border-strong); }
+  .pri-label:hover { background: var(--surface2); }
+
+  /* Stock indicator */
+  .stock-indicator {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius-sm); padding: 10px 12px;
+    font-size: 12px; color: var(--text-2); margin-top: 4px;
+  }
+  .stock-indicator.low { background: var(--red-bg); border-color: var(--red-border); color: var(--red); }
+  .stock-indicator.ok { background: var(--green-bg); border-color: var(--green-border); color: var(--green); }
+  .stock-label { font-weight: 500; }
+
+  /* Success toast */
+  .toast {
+    position: fixed; bottom: 24px; right: 24px; z-index: 200;
+    background: var(--text); color: white;
+    border-radius: var(--radius); padding: 14px 18px;
+    font-size: 13px; font-weight: 500;
+    box-shadow: var(--shadow-md);
+    display: flex; align-items: center; gap: 10px;
+    transform: translateY(80px); opacity: 0;
+    transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    pointer-events: none; max-width: 360px;
+  }
+  .toast.show { transform: translateY(0); opacity: 1; }
+  .toast-icon { width: 20px; height: 20px; border-radius: 50%; background: var(--green); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+  /* Detail panel */
+  .detail-panel {
+    position: fixed; right: 0; top: 0; bottom: 0;
+    width: 420px; background: var(--surface);
+    border-left: 1px solid var(--border);
+    z-index: 50; transform: translateX(100%);
+    transition: transform 0.25s cubic-bezier(0.4,0,0.2,1);
+    overflow-y: auto; box-shadow: -4px 0 20px rgba(0,0,0,0.08);
+  }
+  .detail-panel.open { transform: translateX(0); }
+  .detail-header {
+    padding: 20px 20px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; justify-content: space-between;
+    position: sticky; top: 0; background: var(--surface); z-index: 1;
+  }
+  .detail-section { padding: 18px 20px; border-bottom: 1px solid var(--border); }
+  .detail-section:last-child { border-bottom: none; }
+  .detail-section-title { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 12px; }
+  .detail-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; gap: 12px; }
+  .detail-row:last-child { margin-bottom: 0; }
+  .detail-key { font-size: 12px; color: var(--text-3); flex-shrink: 0; }
+  .detail-val { font-size: 12px; font-weight: 500; color: var(--text); text-align: right; }
+  .timeline-item { display: flex; gap: 12px; margin-bottom: 14px; }
+  .timeline-item:last-child { margin-bottom: 0; }
+  .tl-dot-wrap { display: flex; flex-direction: column; align-items: center; }
+  .tl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 4px; flex-shrink: 0; }
+  .tl-line { flex: 1; width: 1px; background: var(--border); margin: 3px 0; }
+  .timeline-item:last-child .tl-line { display: none; }
+  .tl-title { font-size: 12px; font-weight: 500; color: var(--text); }
+  .tl-time { font-size: 11px; color: var(--text-3); margin-top: 2px; }
+  .tl-note { font-size: 11px; color: var(--text-2); margin-top: 3px; background: var(--surface2); border-radius: 4px; padding: 4px 8px; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; }
+    .stats-row { grid-template-columns: repeat(2,1fr); }
+    .form-row { grid-template-columns: 1fr; }
+    .form-row.three { grid-template-columns: 1fr; }
+    .detail-panel { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-tag">Procurement</div>
+      <div class="logo-name">Build<span class="logo-dot">Pro</span></div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group-label">Main</div>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" fill="currentColor" opacity=".7"/><rect x="9" y="1" width="6" height="6" rx="1" fill="currentColor" opacity=".4"/><rect x="1" y="9" width="6" height="6" rx="1" fill="currentColor" opacity=".4"/><rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" opacity=".4"/></svg>
+        Dashboard
+      </a>
+      <a class="nav-item active" href="#">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Material Indent
+        <span class="nav-badge amber" id="nav-count">3</span>
+      </a>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="2" y="1" width="12" height="14" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+        Purchase Orders
+      </a>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/><path d="M8 5v3.5L10.5 10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        Quotations
+      </a>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M1 6h14" stroke="currentColor" stroke-width="1.1"/><path d="M5 10h2M9 10h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        Invoices
+        <span class="nav-badge">2</span>
+      </a>
+      <div class="nav-group-label">Manage</div>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/><path d="M1 14c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        Vendors
+      </a>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="8" width="6" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="4" width="6" height="11" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="3" y="1" width="10" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+        Inventory
+      </a>
+      <a class="nav-item" href="#">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M2 14V6l4-4h6l2 2v10H2z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M6 2v4H2" stroke="currentColor" stroke-width="1.1"/><path d="M5 10h6M5 12.5h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+        Reports
+      </a>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-row">
+        <div class="user-avatar">RK</div>
+        <div>
+          <div class="user-name">Ramesh Kumar</div>
+          <div class="user-role">Purchase Manager</div>
+        </div>
+      </div>
+      <div class="project-pill">
+        <div class="project-dot"></div>
+        Whitefield Residency
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-breadcrumb">
+        <span class="bc-link">BuildPro</span>
+        <span class="bc-sep">›</span>
+        <span class="bc-current">Material Indent</span>
+      </div>
+      <button class="btn btn-ghost" onclick="exportCSV()">
+        <svg viewBox="0 0 14 14" fill="none"><path d="M7 1v8M4 6l3 3 3-3M2 11h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Export
+      </button>
+      <button class="btn btn-accent" onclick="openModal()">
+        <svg viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        New Indent
+      </button>
+    </div>
+
+    <div class="content">
+      <div class="page-header">
+        <div class="page-title">Material Indent</div>
+        <div class="page-sub">Raise and track material requisitions for your site.</div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="stat-label">Total indents</div>
+          <div class="stat-value" id="stat-total">0</div>
+          <div class="stat-sub">This month</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Pending approval</div>
+          <div class="stat-value" id="stat-pending">0</div>
+          <div class="stat-sub"><span class="stat-dot" style="background:var(--warning)"></span>Awaiting review</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Approved</div>
+          <div class="stat-value" id="stat-approved">0</div>
+          <div class="stat-sub"><span class="stat-dot" style="background:var(--green)"></span>Ready for PO</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">PO raised</div>
+          <div class="stat-value" id="stat-po">0</div>
+          <div class="stat-sub"><span class="stat-dot" style="background:var(--blue)"></span>In procurement</div>
+        </div>
+      </div>
+
+      <!-- Tabs -->
+      <div class="tab-row">
+        <div class="tab active" onclick="filterTab('all',this)">All <span class="tab-count" id="tab-all">0</span></div>
+        <div class="tab" onclick="filterTab('Pending',this)">Pending <span class="tab-count" id="tab-pending">0</span></div>
+        <div class="tab" onclick="filterTab('Approved',this)">Approved <span class="tab-count" id="tab-approved">0</span></div>
+        <div class="tab" onclick="filterTab('PO Raised',this)">PO Raised <span class="tab-count" id="tab-po">0</span></div>
+        <div class="tab" onclick="filterTab('Rejected',this)">Rejected <span class="tab-count" id="tab-rejected">0</span></div>
+      </div>
+
+      <!-- Toolbar -->
+      <div class="toolbar">
+        <div class="search-wrap">
+          <svg viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.5" stroke="currentColor" stroke-width="1.4"/><path d="M9.5 9.5l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <input class="search-input" type="text" placeholder="Search material, engineer…" oninput="searchIndents(this.value)" id="search-input">
+        </div>
+        <button class="filter-btn" id="filter-high" onclick="togglePriorityFilter('High',this)">
+          <svg viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4" fill="var(--red)" opacity="0.8"/></svg>
+          High priority
+        </button>
+        <button class="filter-btn" id="filter-medium" onclick="togglePriorityFilter('Medium',this)">
+          <svg viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4" fill="var(--warning)" opacity="0.8"/></svg>
+          Medium
+        </button>
+        <button class="filter-btn" style="margin-left:auto" onclick="clearFilters()">Clear filters</button>
+      </div>
+
+      <!-- Table -->
+      <div class="table-wrap">
+        <table id="indent-table">
+          <thead>
+            <tr>
+              <th>Indent no.</th>
+              <th>Material</th>
+              <th>Category</th>
+              <th>Qty</th>
+              <th>Required by</th>
+              <th>Raised by</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="indent-tbody"></tbody>
+        </table>
+        <div id="empty-state" class="empty-state" style="display:none">
+          <div class="empty-icon">📋</div>
+          <div class="empty-title">No indents found</div>
+          <div class="empty-sub">Try adjusting your filters or raise a new indent</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New Indent Modal -->
+<div class="overlay" id="modal-overlay" onclick="handleOverlayClick(event)">
+  <div class="modal" id="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Raise new material indent</div>
+        <div class="modal-sub">Whitefield Residency · IND-0<span id="next-num">92</span></div>
+      </div>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <!-- Project & Raised by -->
+      <div class="form-section">
+        <div class="form-section-title">Basic details</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Project <span>*</span></label>
+            <select class="form-select" id="f-project">
+              <option>Whitefield Residency</option>
+              <option>Koramangala Commercial</option>
+              <option>Yelahanka Phase 2</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Raised by <span>*</span></label>
+            <select class="form-select" id="f-raised-by">
+              <option>Suresh (Site Engineer)</option>
+              <option>Kiran (Site Engineer)</option>
+              <option>Mohan (Supervisor)</option>
+              <option>Ramesh Kumar (Purchase Mgr)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Material -->
+      <div class="form-section">
+        <div class="form-section-title">Material details</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label">Material category <span>*</span></label>
+            <select class="form-select" id="f-category" onchange="updateMaterials()">
+              <option value="">Select category</option>
+              <option>Steel & Iron</option>
+              <option>Cement & Aggregates</option>
+              <option>Sand</option>
+              <option>Bricks & Blocks</option>
+              <option>Tiles & Flooring</option>
+              <option>Electrical</option>
+              <option>Plumbing</option>
+              <option>Timber & Wood</option>
+              <option>Paint</option>
+              <option>Other</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Material name <span>*</span></label>
+            <select class="form-select" id="f-material" onchange="checkStock()">
+              <option value="">Select material</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row three">
+          <div class="form-group">
+            <label class="form-label">Quantity <span>*</span></label>
+            <input class="form-input" type="number" id="f-qty" placeholder="e.g. 100" min="1" oninput="checkStock()">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Unit</label>
+            <select class="form-select" id="f-unit">
+              <option>Bags</option>
+              <option>MT</option>
+              <option>Units</option>
+              <option>Pieces</option>
+              <option>Sqft</option>
+              <option>Running ft</option>
+              <option>Litres</option>
+              <option>Kg</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Required by <span>*</span></label>
+            <input class="form-input" type="date" id="f-date">
+          </div>
+        </div>
+
+        <!-- Stock indicator -->
+        <div id="stock-indicator" class="stock-indicator" style="display:none">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.4"/><path d="M7 4v3.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="7" cy="10" r="0.7" fill="currentColor"/></svg>
+          <span id="stock-text">Checking stock…</span>
+        </div>
+      </div>
+
+      <!-- Priority -->
+      <div class="form-section">
+        <div class="form-section-title">Priority</div>
+        <div class="priority-group">
+          <input type="radio" name="priority" value="High" id="pri-high" class="pri-opt">
+          <label for="pri-high" class="pri-label high">🔴 High</label>
+          <input type="radio" name="priority" value="Medium" id="pri-med" class="pri-opt" checked>
+          <label for="pri-med" class="pri-label medium">🟡 Medium</label>
+          <input type="radio" name="priority" value="Low" id="pri-low" class="pri-opt">
+          <label for="pri-low" class="pri-label low">⚪ Low</label>
+        </div>
+        <div class="form-hint" style="margin-top:8px">High priority indents trigger immediate notification to the purchase manager.</div>
+      </div>
+
+      <!-- Notes -->
+      <div class="form-section" style="margin-bottom:0">
+        <div class="form-section-title">Additional notes</div>
+        <div class="form-group" style="margin-bottom:0">
+          <label class="form-label">Remarks / specifications</label>
+          <textarea class="form-textarea" id="f-notes" placeholder="e.g. JSW brand preferred, Grade Fe-500, delivery at Gate 2…"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal()">Cancel</button>
+      <button class="btn btn-ghost" onclick="saveDraft()">Save draft</button>
+      <button class="btn btn-accent" onclick="submitIndent()">Submit indent →</button>
+    </div>
+  </div>
+</div>
+
+<!-- Detail Panel -->
+<div class="detail-panel" id="detail-panel">
+  <div class="detail-header">
+    <div>
+      <div class="modal-title" id="dp-title">IND-087</div>
+      <div class="modal-sub" id="dp-sub">Material Indent Details</div>
+    </div>
+    <button class="modal-close" onclick="closeDetail()">✕</button>
+  </div>
+  <div class="detail-section">
+    <div class="detail-section-title">Indent information</div>
+    <div id="dp-info"></div>
+  </div>
+  <div class="detail-section">
+    <div class="detail-section-title">Approval trail</div>
+    <div id="dp-timeline"></div>
+  </div>
+  <div class="detail-section" id="dp-actions-section">
+    <div class="detail-section-title">Actions</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap" id="dp-actions"></div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <div class="toast-icon">
+    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 5l2 2 4-4" stroke="white" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+  <span id="toast-text">Indent submitted successfully</span>
+</div>
+
+<script>
+// ── Data ────────────────────────────────────────────────────────────────────
+const MATERIALS = {
+  'Steel & Iron': ['TMT Steel 8mm','TMT Steel 10mm','TMT Steel 12mm','TMT Steel 16mm','TMT Steel 20mm','MS Plates','Binding Wire'],
+  'Cement & Aggregates': ['OPC 43 Grade Cement','OPC 53 Grade Cement','PPC Cement','Coarse Aggregate 20mm','Coarse Aggregate 40mm'],
+  'Sand': ['River Sand','M-Sand (Manufactured)','Plastering Sand'],
+  'Bricks & Blocks': ['Clay Bricks (Standard)','Fly Ash Bricks','AAC Blocks 600mm','Cement Solid Blocks'],
+  'Tiles & Flooring': ['Vitrified Tiles 2x2','Ceramic Wall Tiles','Granite Slab','Marble Slab','Anti-skid Tiles'],
+  'Electrical': ['CPVC Pipes 1 inch','PVC Conduit 25mm','MCB 32A','Switches (Modular)','Cables 4 SqMM'],
+  'Plumbing': ['UPVC Pipe 4 inch','GI Pipe 1 inch','Ball Valve 1 inch','CPVC Elbow','PVC Soil Pipe'],
+  'Timber & Wood': ['Teak Wood (Seasoned)','Plywood 18mm BWR','MDF Board 12mm','Door Frame (Sal Wood)'],
+  'Paint': ['Interior Emulsion 20L','Exterior Emulsion 20L','Primer 20L','Putty 40kg','Enamel Paint 4L'],
+  'Other': ['Other material']
+};
+
+const STOCK = {
+  'TMT Steel 16mm': { qty: 1.2, unit:'MT', status:'low' },
+  'TMT Steel 12mm': { qty: 0.8, unit:'MT', status:'low' },
+  'OPC 53 Grade Cement': { qty: 84, unit:'Bags', status:'ok' },
+  'OPC 43 Grade Cement': { qty: 32, unit:'Bags', status:'ok' },
+  'M-Sand (Manufactured)': { qty: 18, unit:'Units', status:'ok' },
+  'River Sand': { qty: 4, unit:'Units', status:'low' },
+  'AAC Blocks 600mm': { qty: 320, unit:'Pieces', status:'ok' },
+  'CPVC Pipes 1 inch': { qty: 45, unit:'Pieces', status:'low' },
+  'Vitrified Tiles 2x2': { qty: 0, unit:'Sqft', status:'low' },
+};
+
+let indents = [
+  { id:'IND-087', material:'TMT Steel 12mm', category:'Steel & Iron', qty:2.5, unit:'MT', date:'2026-04-05', raisedBy:'Suresh (Site Engineer)', priority:'High', status:'Pending', project:'Whitefield Residency', notes:'JSW brand preferred, Fe-500 grade', submitted:'30 Mar 2026, 10:14 AM' },
+  { id:'IND-086', material:'OPC 53 Grade Cement', category:'Cement & Aggregates', qty:120, unit:'Bags', date:'2026-04-08', raisedBy:'Suresh (Site Engineer)', priority:'Medium', status:'Pending', project:'Whitefield Residency', notes:'ACC or Ultratech only', submitted:'29 Mar 2026, 3:45 PM' },
+  { id:'IND-085', material:'River Sand', category:'Sand', qty:10, unit:'Units', date:'2026-04-10', raisedBy:'Kiran (Site Engineer)', priority:'Low', status:'Approved', project:'Whitefield Residency', notes:'', submitted:'28 Mar 2026, 9:00 AM', approvedBy:'Ramesh Kumar', approvedOn:'28 Mar 2026, 2:10 PM' },
+  { id:'IND-084', material:'CPVC Pipes 1 inch', category:'Plumbing', qty:200, unit:'Pieces', date:'2026-04-01', raisedBy:'Suresh (Site Engineer)', priority:'Medium', status:'PO Raised', project:'Whitefield Residency', notes:'', submitted:'25 Mar 2026, 11:30 AM', approvedBy:'Ramesh Kumar', approvedOn:'25 Mar 2026, 4:00 PM' },
+  { id:'IND-083', material:'AAC Blocks 600mm', category:'Bricks & Blocks', qty:500, unit:'Pieces', date:'2026-03-28', raisedBy:'Kiran (Site Engineer)', priority:'Low', status:'PO Raised', project:'Whitefield Residency', notes:'Ultratech AAC preferred', submitted:'22 Mar 2026, 8:45 AM', approvedBy:'Ramesh Kumar', approvedOn:'22 Mar 2026, 1:30 PM' },
+  { id:'IND-082', material:'Vitrified Tiles 2x2', category:'Tiles & Flooring', qty:1200, unit:'Sqft', date:'2026-03-20', raisedBy:'Mohan (Supervisor)', priority:'Medium', status:'Rejected', project:'Whitefield Residency', notes:'', submitted:'18 Mar 2026, 10:00 AM', rejectedBy:'Ramesh Kumar', rejectedOn:'18 Mar 2026, 5:00 PM', rejectReason:'Tile specification not finalized yet. Pending interior designer confirmation.' },
+];
+
+let activeTab = 'all';
+let activeSearch = '';
+let activePriFilter = '';
+let indentCounter = 92;
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function updateStats() {
+  document.getElementById('stat-total').textContent = indents.length;
+  document.getElementById('stat-pending').textContent = indents.filter(i=>i.status==='Pending').length;
+  document.getElementById('stat-approved').textContent = indents.filter(i=>i.status==='Approved').length;
+  document.getElementById('stat-po').textContent = indents.filter(i=>i.status==='PO Raised').length;
+  document.getElementById('tab-all').textContent = indents.length;
+  document.getElementById('tab-pending').textContent = indents.filter(i=>i.status==='Pending').length;
+  document.getElementById('tab-approved').textContent = indents.filter(i=>i.status==='Approved').length;
+  document.getElementById('tab-po').textContent = indents.filter(i=>i.status==='PO Raised').length;
+  document.getElementById('tab-rejected').textContent = indents.filter(i=>i.status==='Rejected').length;
+  document.getElementById('nav-count').textContent = indents.filter(i=>i.status==='Pending').length;
+}
+
+function getFiltered() {
+  return indents.filter(i => {
+    const matchTab = activeTab==='all' || i.status===activeTab;
+    const q = activeSearch.toLowerCase();
+    const matchSearch = !q || i.material.toLowerCase().includes(q) || i.raisedBy.toLowerCase().includes(q) || i.id.toLowerCase().includes(q);
+    const matchPri = !activePriFilter || i.priority===activePriFilter;
+    return matchTab && matchSearch && matchPri;
+  });
+}
+
+function renderTable() {
+  const filtered = getFiltered();
+  const tbody = document.getElementById('indent-tbody');
+  const empty = document.getElementById('empty-state');
+  if (!filtered.length) { tbody.innerHTML=''; empty.style.display='block'; return; }
+  empty.style.display='none';
+  tbody.innerHTML = filtered.map(row => `
+    <tr onclick="openDetail('${row.id}')" style="cursor:pointer">
+      <td class="td-mono">${row.id}</td>
+      <td><div class="td-bold">${row.material}</div><div style="font-size:11px;color:var(--text-3);margin-top:1px">${row.category}</div></td>
+      <td style="color:var(--text-3)">${row.category}</td>
+      <td class="td-mono">${row.qty} <span style="color:var(--text-3)">${row.unit}</span></td>
+      <td>${formatDate(row.date)}</td>
+      <td style="color:var(--text-2)">${row.raisedBy.split(' (')[0]}</td>
+      <td>${priorityBadge(row.priority)}</td>
+      <td>${statusBadge(row.status)}</td>
+      <td onclick="event.stopPropagation()">
+        <div class="row-actions">
+          ${row.status==='Pending'?`<button class="row-btn approve" onclick="quickAction('${row.id}','Approved')">Approve</button><button class="row-btn reject" onclick="quickAction('${row.id}','Rejected')">Reject</button>`:''}
+          ${row.status==='Approved'?`<button class="row-btn" onclick="quickAction('${row.id}','PO Raised')">Raise PO</button>`:''}
+          <button class="row-btn" onclick="openDetail('${row.id}')">View</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+  updateStats();
+}
+
+function priorityBadge(p) {
+  const cls = p==='High'?'pri-high':p==='Medium'?'pri-medium':'pri-low';
+  return `<span class="priority-badge ${cls}">${p}</span>`;
+}
+
+function statusBadge(s) {
+  const cls = s==='Pending'?'badge-pending':s==='Approved'?'badge-approved':s==='Rejected'?'badge-rejected':'badge-po';
+  return `<span class="badge ${cls}">${s}</span>`;
+}
+
+function formatDate(d) {
+  const dt = new Date(d);
+  return dt.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'});
+}
+
+// ── Filters ──────────────────────────────────────────────────────────────────
+function filterTab(val, el) {
+  activeTab = val;
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  renderTable();
+}
+
+function searchIndents(val) { activeSearch=val; renderTable(); }
+
+function togglePriorityFilter(val, btn) {
+  if(activePriFilter===val){ activePriFilter=''; btn.classList.remove('active-filter'); }
+  else {
+    activePriFilter=val;
+    document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active-filter'));
+    btn.classList.add('active-filter');
+  }
+  renderTable();
+}
+
+function clearFilters() {
+  activeSearch=''; activePriFilter='';
+  document.getElementById('search-input').value='';
+  document.querySelectorAll('.filter-btn').forEach(b=>b.classList.remove('active-filter'));
+  renderTable();
+}
+
+// ── Modal ────────────────────────────────────────────────────────────────────
+function openModal() {
+  document.getElementById('modal-overlay').classList.add('open');
+  document.getElementById('next-num').textContent = String(indentCounter).padStart(3,'0');
+  const today = new Date(); today.setDate(today.getDate()+7);
+  document.getElementById('f-date').value = today.toISOString().split('T')[0];
+  document.getElementById('f-date').min = new Date().toISOString().split('T')[0];
+}
+
+function closeModal() { document.getElementById('modal-overlay').classList.remove('open'); }
+
+function handleOverlayClick(e) { if(e.target===document.getElementById('modal-overlay')) closeModal(); }
+
+function updateMaterials() {
+  const cat = document.getElementById('f-category').value;
+  const sel = document.getElementById('f-material');
+  sel.innerHTML = '<option value="">Select material</option>';
+  (MATERIALS[cat]||[]).forEach(m => { const o=document.createElement('option'); o.textContent=m; sel.appendChild(o); });
+  document.getElementById('stock-indicator').style.display='none';
+}
+
+function checkStock() {
+  const mat = document.getElementById('f-material').value;
+  const qty = parseFloat(document.getElementById('f-qty').value)||0;
+  const ind = document.getElementById('stock-indicator');
+  if(!mat||!qty){ ind.style.display='none'; return; }
+  const s = STOCK[mat];
+  ind.style.display='flex';
+  if(s) {
+    const txt = `Current stock: ${s.qty} ${s.unit}`;
+    const isLow = s.status==='low' || qty > s.qty*2;
+    ind.className = 'stock-indicator ' + (isLow?'low':'ok');
+    document.getElementById('stock-text').textContent = txt + (isLow?' — Stock is low, urgent procurement needed':' — Sufficient stock available');
+  } else {
+    ind.className = 'stock-indicator';
+    document.getElementById('stock-text').textContent = 'No stock record found — will be checked by manager.';
+  }
+}
+
+function submitIndent() {
+  const mat = document.getElementById('f-material').value;
+  const qty = document.getElementById('f-qty').value;
+  const date = document.getElementById('f-date').value;
+  const cat = document.getElementById('f-category').value;
+  if(!mat||!qty||!date||!cat){ showToast('Please fill all required fields.','error'); return; }
+  const pri = document.querySelector('input[name="priority"]:checked').value;
+  const now = new Date();
+  const id = `IND-0${String(indentCounter++).padStart(2,'0')}`;
+  indents.unshift({
+    id, material:mat, category:cat, qty:parseFloat(qty),
+    unit:document.getElementById('f-unit').value,
+    date, raisedBy:document.getElementById('f-raised-by').value,
+    priority:pri, status:'Pending',
+    project:document.getElementById('f-project').value,
+    notes:document.getElementById('f-notes').value,
+    submitted: now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+', '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})
+  });
+  closeModal(); renderTable(); updateStats();
+  showToast(`Indent ${id} submitted — pending approval`);
+  resetForm();
+}
+
+function saveDraft() {
+  closeModal();
+  showToast('Draft saved — you can resume later','info');
+}
+
+function resetForm() {
+  ['f-category','f-material','f-qty','f-notes'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
+  document.getElementById('f-unit').value='Bags';
+  document.getElementById('pri-med').checked=true;
+  document.getElementById('stock-indicator').style.display='none';
+}
+
+// ── Quick actions ────────────────────────────────────────────────────────────
+function quickAction(id, newStatus) {
+  const row = indents.find(i=>i.id===id);
+  if(!row) return;
+  const now = new Date();
+  const ts = now.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'})+', '+now.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+  row.status = newStatus;
+  if(newStatus==='Approved'){ row.approvedBy='Ramesh Kumar'; row.approvedOn=ts; }
+  if(newStatus==='Rejected'){ row.rejectedBy='Ramesh Kumar'; row.rejectedOn=ts; row.rejectReason='Rejected by purchase manager.'; }
+  if(newStatus==='PO Raised'){ row.poOn=ts; }
+  renderTable(); updateStats();
+  const msgs = { Approved:`${id} approved — ready for quotation`, Rejected:`${id} has been rejected`, 'PO Raised':`PO raised for ${id}` };
+  showToast(msgs[newStatus]||'Status updated');
+  if(document.getElementById('detail-panel').classList.contains('open')) openDetail(id);
+}
+
+// ── Detail panel ─────────────────────────────────────────────────────────────
+function openDetail(id) {
+  const row = indents.find(i=>i.id===id);
+  if(!row) return;
+  document.getElementById('dp-title').textContent = row.id;
+  document.getElementById('dp-sub').textContent = row.material + ' · ' + row.project;
+  document.getElementById('dp-info').innerHTML = `
+    <div class="detail-row"><span class="detail-key">Material</span><span class="detail-val">${row.material}</span></div>
+    <div class="detail-row"><span class="detail-key">Category</span><span class="detail-val">${row.category}</span></div>
+    <div class="detail-row"><span class="detail-key">Quantity</span><span class="detail-val">${row.qty} ${row.unit}</span></div>
+    <div class="detail-row"><span class="detail-key">Required by</span><span class="detail-val">${formatDate(row.date)}</span></div>
+    <div class="detail-row"><span class="detail-key">Raised by</span><span class="detail-val">${row.raisedBy}</span></div>
+    <div class="detail-row"><span class="detail-key">Priority</span><span class="detail-val">${priorityBadge(row.priority)}</span></div>
+    <div class="detail-row"><span class="detail-key">Status</span><span class="detail-val">${statusBadge(row.status)}</span></div>
+    ${row.notes?`<div class="detail-row"><span class="detail-key">Notes</span><span class="detail-val" style="font-size:11px;max-width:220px;text-align:right">${row.notes}</span></div>`:''}
+  `;
+  let timeline = `
+    <div class="timeline-item">
+      <div class="tl-dot-wrap"><div class="tl-dot" style="background:var(--blue)"></div><div class="tl-line"></div></div>
+      <div><div class="tl-title">Indent submitted</div><div class="tl-time">${row.submitted}</div><div class="tl-note">Raised by ${row.raisedBy}</div></div>
+    </div>`;
+  if(row.approvedBy) timeline+=`
+    <div class="timeline-item">
+      <div class="tl-dot-wrap"><div class="tl-dot" style="background:var(--green)"></div><div class="tl-line"></div></div>
+      <div><div class="tl-title">Approved</div><div class="tl-time">${row.approvedOn}</div><div class="tl-note">By ${row.approvedBy}</div></div>
+    </div>`;
+  if(row.rejectedBy) timeline+=`
+    <div class="timeline-item">
+      <div class="tl-dot-wrap"><div class="tl-dot" style="background:var(--red)"></div><div class="tl-line"></div></div>
+      <div><div class="tl-title">Rejected</div><div class="tl-time">${row.rejectedOn}</div>${row.rejectReason?`<div class="tl-note">${row.rejectReason}</div>`:''}</div>
+    </div>`;
+  if(row.status==='Pending') timeline+=`
+    <div class="timeline-item">
+      <div class="tl-dot-wrap"><div class="tl-dot" style="background:var(--border-strong);opacity:0.5"></div></div>
+      <div><div class="tl-title" style="color:var(--text-3)">Awaiting approval</div><div class="tl-time">Purchase manager review pending</div></div>
+    </div>`;
+  if(row.status==='PO Raised') timeline+=`
+    <div class="timeline-item">
+      <div class="tl-dot-wrap"><div class="tl-dot" style="background:var(--accent)"></div></div>
+      <div><div class="tl-title">PO raised</div><div class="tl-time">${row.poOn||'—'}</div></div>
+    </div>`;
+  document.getElementById('dp-timeline').innerHTML = timeline;
+  let actions = '';
+  if(row.status==='Pending') actions=`<button class="btn btn-ghost" style="font-size:12px;color:var(--green);border-color:var(--green-border);background:var(--green-bg)" onclick="quickAction('${row.id}','Approved')">Approve indent</button><button class="btn btn-ghost" style="font-size:12px;color:var(--red);border-color:var(--red-border);background:var(--red-bg)" onclick="quickAction('${row.id}','Rejected')">Reject</button>`;
+  else if(row.status==='Approved') actions=`<button class="btn btn-accent" style="font-size:12px" onclick="quickAction('${row.id}','PO Raised')">Raise PO →</button>`;
+  else actions=`<span style="font-size:12px;color:var(--text-3)">No actions available for this status.</span>`;
+  document.getElementById('dp-actions').innerHTML=actions;
+  document.getElementById('detail-panel').classList.add('open');
+}
+
+function closeDetail() { document.getElementById('detail-panel').classList.remove('open'); }
+
+// ── Toast ────────────────────────────────────────────────────────────────────
+function showToast(msg, type='success') {
+  const t = document.getElementById('toast');
+  document.getElementById('toast-text').textContent = msg;
+  t.style.background = type==='error' ? 'var(--red)' : type==='info' ? 'var(--blue)' : 'var(--text)';
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 3200);
+}
+
+// ── Export ───────────────────────────────────────────────────────────────────
+function exportCSV() {
+  const rows = [['Indent No','Material','Category','Qty','Unit','Required By','Raised By','Priority','Status']];
+  getFiltered().forEach(r=>rows.push([r.id,r.material,r.category,r.qty,r.unit,r.date,r.raisedBy,r.priority,r.status]));
+  const csv = rows.map(r=>r.join(',')).join('\n');
+  const a=document.createElement('a'); a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csv);
+  a.download='material-indents.csv'; a.click();
+  showToast('Exported to CSV','info');
+}
+
+// ── Init ─────────────────────────────────────────────────────────────────────
+renderTable(); updateStats();
+document.addEventListener('keydown', e => { if(e.key==='Escape'){ closeModal(); closeDetail(); } });
+</script>
+</body>
+</html>

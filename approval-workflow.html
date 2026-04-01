@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Approval Workflow — BuildPro</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #F5F3EF;
+  --surface: #FFFFFF;
+  --surface2: #F0EDE8;
+  --surface3: #E8E4DE;
+  --border: #E2DDD6;
+  --border-strong: #C8C2B8;
+  --text: #1C1A17;
+  --text-2: #6B6560;
+  --text-3: #A09A93;
+  --accent: #C17B3A;
+  --accent-bg: #FDF3E7;
+  --accent-border: #E8C49A;
+  --blue: #2D6FA8;
+  --blue-bg: #EEF4FB;
+  --blue-border: #A8C8E8;
+  --green: #2A7A4B;
+  --green-bg: #EBF5EF;
+  --green-border: #9DD4B3;
+  --red: #B83A3A;
+  --red-bg: #FBEEEE;
+  --red-border: #E8AAAA;
+  --yellow: #8A6A1A;
+  --yellow-bg: #FBF5E6;
+  --yellow-border: #DFC88A;
+  --purple: #5B3F9A;
+  --purple-bg: #F0EBFB;
+  --purple-border: #C4AEEC;
+  --radius: 10px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 16px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.04);
+}
+body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.5; }
+
+/* ── Layout ── */
+.layout { display: flex; min-height: 100vh; }
+.sidebar {
+  width: 240px; min-width: 240px; background: var(--surface);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column;
+  position: fixed; top: 0; left: 0; bottom: 0; z-index: 10;
+}
+.sidebar-logo { padding: 20px 20px 16px; border-bottom: 1px solid var(--border); }
+.logo-tag { font-size: 10px; font-weight: 500; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-3); }
+.logo-name { font-size: 18px; font-weight: 600; color: var(--text); margin-top: 2px; }
+.logo-dot { color: var(--accent); }
+.sidebar-nav { flex: 1; padding: 12px 10px; overflow-y: auto; }
+.nav-group-label { font-size: 10px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); padding: 10px 10px 4px; }
+.nav-item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--radius-sm); font-size: 13px; color: var(--text-2); cursor: pointer; transition: all 0.15s; margin-bottom: 1px; }
+.nav-item:hover { background: var(--surface2); color: var(--text); }
+.nav-item.active { background: var(--accent-bg); color: var(--accent); font-weight: 500; }
+.nav-item svg { width: 15px; height: 15px; flex-shrink: 0; opacity: 0.7; }
+.nav-item.active svg { opacity: 1; }
+.nav-badge { margin-left: auto; font-size: 10px; font-weight: 600; border-radius: 10px; padding: 1px 7px; font-family: 'DM Mono', monospace; }
+.nb-red { background: var(--red-bg); color: var(--red); }
+.nb-amber { background: var(--yellow-bg); color: var(--yellow); }
+.nb-purple { background: var(--purple-bg); color: var(--purple); }
+.sidebar-footer { padding: 14px 16px; border-top: 1px solid var(--border); }
+.user-row { display: flex; align-items: center; gap: 10px; }
+.user-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; flex-shrink: 0; }
+.ua-pm { background: var(--accent-bg); border: 1px solid var(--accent-border); color: var(--accent); }
+.ua-dir { background: var(--purple-bg); border: 1px solid var(--purple-border); color: var(--purple); }
+.user-name { font-size: 13px; font-weight: 500; }
+.user-role { font-size: 11px; color: var(--text-3); }
+.role-switch { margin-top: 10px; }
+.role-switch-label { font-size: 10px; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px; }
+.role-pills { display: flex; gap: 6px; }
+.role-pill { flex: 1; text-align: center; font-size: 11px; font-weight: 500; padding: 5px 8px; border-radius: 20px; border: 1px solid var(--border); color: var(--text-3); cursor: pointer; transition: all 0.15s; }
+.role-pill.active-pm { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border); }
+.role-pill.active-dir { background: var(--purple-bg); color: var(--purple); border-color: var(--purple-border); }
+
+.main { margin-left: 240px; flex: 1; display: flex; flex-direction: column; }
+.topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 28px; display: flex; align-items: center; gap: 14px; position: sticky; top: 0; z-index: 5; }
+.topbar-left { flex: 1; }
+.bc-link { font-size: 13px; color: var(--text-3); cursor: pointer; }
+.bc-sep { color: var(--text-3); font-size: 12px; margin: 0 4px; }
+.bc-current { font-size: 13px; font-weight: 500; color: var(--text); }
+.topbar-role-tag { font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 10px; margin-top: 3px; display: inline-block; }
+.tag-pm { background: var(--accent-bg); color: var(--accent); }
+.tag-dir { background: var(--purple-bg); color: var(--purple); }
+.btn { display: inline-flex; align-items: center; gap: 6px; font-family: 'DM Sans', sans-serif; font-size: 13px; font-weight: 500; padding: 8px 16px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.btn:hover { background: var(--surface2); }
+.btn-green { background: var(--green); color: white; border-color: var(--green); }
+.btn-green:hover { background: #226040; }
+.btn-red { background: var(--red); color: white; border-color: var(--red); }
+.btn-red:hover { background: #9a2f2f; }
+.btn-purple { background: var(--purple); color: white; border-color: var(--purple); }
+.btn-purple:hover { background: #4a3280; }
+.btn svg { width: 14px; height: 14px; }
+
+.content { padding: 28px; flex: 1; }
+.page-header { margin-bottom: 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.page-title { font-size: 22px; font-weight: 600; color: var(--text); }
+.page-sub { font-size: 13px; color: var(--text-2); margin-top: 3px; }
+
+/* ── Stats ── */
+.stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; box-shadow: var(--shadow); position: relative; overflow: hidden; }
+.stat-card::after { content:''; position:absolute; top:0; left:0; right:0; height:3px; border-radius: var(--radius) var(--radius) 0 0; }
+.stat-pending::after { background: var(--yellow); }
+.stat-escalated::after { background: var(--purple); }
+.stat-approved::after { background: var(--green); }
+.stat-rejected::after { background: var(--red); }
+.stat-label { font-size: 11px; font-weight: 500; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.06em; }
+.stat-value { font-size: 28px; font-weight: 600; color: var(--text); margin-top: 4px; font-family: 'DM Mono', monospace; }
+.stat-sub { font-size: 11px; color: var(--text-3); margin-top: 3px; }
+.stat-trend { font-size: 11px; font-weight: 500; margin-top: 6px; }
+
+/* ── Approval queue ── */
+.queue-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.queue-title { font-size: 14px; font-weight: 600; color: var(--text); }
+.queue-sub { font-size: 12px; color: var(--text-3); margin-top: 1px; }
+.sort-row { display: flex; gap: 8px; align-items: center; }
+.sort-btn { font-size: 11px; font-weight: 500; padding: 5px 10px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); color: var(--text-2); cursor: pointer; transition: all 0.15s; }
+.sort-btn:hover { background: var(--surface2); }
+.sort-btn.active-sort { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border); }
+
+/* ── Indent approval card ── */
+.indent-card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); margin-bottom: 12px;
+  box-shadow: var(--shadow); overflow: hidden;
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+.indent-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.indent-card.escalated { border-left: 3px solid var(--purple); }
+.indent-card.high-pri { border-left: 3px solid var(--red); }
+.card-main { padding: 16px 18px; display: flex; align-items: flex-start; gap: 14px; }
+.card-check { width: 18px; height: 18px; border-radius: 4px; border: 1.5px solid var(--border-strong); cursor: pointer; flex-shrink: 0; margin-top: 2px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; }
+.card-check.checked { background: var(--accent); border-color: var(--accent); }
+.card-check.checked::after { content: '✓'; color: white; font-size: 11px; font-weight: 700; }
+.card-body { flex: 1; }
+.card-top { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.card-id { font-size: 12px; font-family: 'DM Mono', monospace; color: var(--text-3); }
+.card-material { font-size: 15px; font-weight: 600; color: var(--text); }
+.card-meta { display: flex; gap: 16px; margin-top: 6px; flex-wrap: wrap; }
+.meta-item { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); }
+.meta-item svg { width: 12px; height: 12px; color: var(--text-3); flex-shrink: 0; }
+.card-notes { font-size: 12px; color: var(--text-2); background: var(--surface2); border-radius: 4px; padding: 6px 10px; margin-top: 8px; font-style: italic; }
+.card-right { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; flex-shrink: 0; }
+.card-amount { font-size: 16px; font-weight: 600; color: var(--text); font-family: 'DM Mono', monospace; }
+.card-amount-sub { font-size: 10px; color: var(--text-3); text-align: right; }
+
+/* ── Card action bar ── */
+.card-actions {
+  padding: 12px 18px; border-top: 1px solid var(--border);
+  background: var(--surface2); display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.action-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 12px; font-weight: 500; padding: 6px 14px;
+  border-radius: var(--radius-sm); border: 1px solid; cursor: pointer; transition: all 0.15s;
+}
+.ab-approve { background: var(--green-bg); color: var(--green); border-color: var(--green-border); }
+.ab-approve:hover { background: #d4eddc; }
+.ab-reject { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
+.ab-reject:hover { background: #f5d8d8; }
+.ab-escalate { background: var(--purple-bg); color: var(--purple); border-color: var(--purple-border); }
+.ab-escalate:hover { background: #e4d8f8; }
+.ab-info { background: var(--blue-bg); color: var(--blue); border-color: var(--blue-border); }
+.ab-info:hover { background: #ddedf7; }
+.ab-detail { background: transparent; color: var(--text-2); border-color: var(--border); }
+.ab-detail:hover { background: var(--surface3); }
+.escalation-tag { margin-left: auto; font-size: 11px; font-weight: 500; padding: 3px 10px; border-radius: 10px; }
+
+/* ── Budget check bar ── */
+.budget-bar { padding: 10px 18px; border-top: 1px solid var(--border); background: var(--surface); display: flex; align-items: center; gap: 12px; font-size: 12px; }
+.budget-label { color: var(--text-3); min-width: 90px; }
+.budget-track { flex: 1; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; max-width: 200px; }
+.budget-fill { height: 100%; border-radius: 3px; transition: width 0.4s; }
+.budget-text { color: var(--text-2); font-family: 'DM Mono', monospace; }
+.budget-warn { color: var(--red); font-weight: 500; }
+
+/* ── Bulk action bar ── */
+.bulk-bar {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+  background: var(--text); color: white; border-radius: 12px;
+  padding: 12px 20px; display: flex; align-items: center; gap: 14px;
+  box-shadow: var(--shadow-md); z-index: 30; transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+  white-space: nowrap; font-size: 13px;
+}
+.bulk-bar.show { transform: translateX(-50%) translateY(0); }
+.bulk-count { font-weight: 600; background: rgba(255,255,255,0.15); border-radius: 6px; padding: 3px 8px; }
+.bulk-btn { font-size: 12px; font-weight: 500; padding: 6px 14px; border-radius: 6px; border: 1.5px solid rgba(255,255,255,0.25); background: transparent; color: white; cursor: pointer; transition: all 0.15s; }
+.bulk-btn:hover { background: rgba(255,255,255,0.1); }
+.bulk-btn.bulk-approve { border-color: var(--green); background: var(--green); }
+.bulk-btn.bulk-approve:hover { background: #226040; }
+.bulk-btn.bulk-reject { border-color: var(--red); background: var(--red); }
+.bulk-btn.bulk-reject:hover { background: #9a2f2f; }
+.bulk-close { width: 24px; height: 24px; border-radius: 50%; background: rgba(255,255,255,0.1); border: none; color: white; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center; }
+
+/* ── Escalation section ── */
+.escalation-section { margin-top: 28px; }
+.section-divider { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.divider-line { flex: 1; height: 1px; background: var(--border); }
+.divider-label { font-size: 11px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.1em; white-space: nowrap; }
+
+/* ── Badges ── */
+.badge { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 500; padding: 3px 9px; border-radius: 20px; }
+.badge::before { content: ''; width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
+.badge-pending { background: var(--yellow-bg); color: var(--yellow); border: 1px solid var(--yellow-border); }
+.badge-pending::before { background: var(--yellow); }
+.badge-approved { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+.badge-approved::before { background: var(--green); }
+.badge-rejected { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+.badge-rejected::before { background: var(--red); }
+.badge-escalated { background: var(--purple-bg); color: var(--purple); border: 1px solid var(--purple-border); }
+.badge-escalated::before { background: var(--purple); }
+.badge-po { background: var(--blue-bg); color: var(--blue); border: 1px solid var(--blue-border); }
+.badge-po::before { background: var(--blue); }
+.pri-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+
+/* ── Reject modal ── */
+.overlay { position: fixed; inset: 0; background: rgba(28,26,23,0.5); z-index: 100; display: none; align-items: center; justify-content: center; padding: 20px; }
+.overlay.open { display: flex; }
+.modal { background: var(--surface); border-radius: 14px; width: 100%; max-width: 480px; box-shadow: var(--shadow-md); animation: slideUp 0.2s ease; overflow: hidden; }
+@keyframes slideUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+.modal-header { padding: 20px 22px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; }
+.modal-title { font-size: 15px; font-weight: 600; }
+.modal-sub { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.modal-close { width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border); background: transparent; cursor: pointer; font-size: 16px; color: var(--text-3); display: flex; align-items: center; justify-content: center; }
+.modal-close:hover { background: var(--surface2); }
+.modal-body { padding: 20px 22px; }
+.modal-footer { padding: 14px 22px; border-top: 1px solid var(--border); display: flex; gap: 10px; justify-content: flex-end; }
+.form-group { margin-bottom: 14px; }
+.form-label { font-size: 12px; font-weight: 500; color: var(--text-2); margin-bottom: 5px; display: block; }
+.form-label span { color: var(--red); }
+.form-input, .form-select, .form-textarea { padding: 9px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-family: 'DM Sans', sans-serif; font-size: 13px; color: var(--text); background: var(--surface); outline: none; transition: border-color 0.15s; width: 100%; }
+.form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(193,123,58,0.1); }
+.form-textarea { resize: vertical; min-height: 90px; }
+.form-select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23A09A93' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; cursor: pointer; }
+
+/* ── Info request modal ── */
+.info-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 20px; background: var(--surface2); color: var(--text-2); cursor: pointer; margin: 4px; transition: all 0.15s; }
+.info-chip.selected { background: var(--blue-bg); border-color: var(--blue-border); color: var(--blue); }
+
+/* ── History log ── */
+.log-item { display: flex; gap: 12px; padding: 12px 18px; border-bottom: 1px solid var(--border); font-size: 12px; }
+.log-item:last-child { border-bottom: none; }
+.log-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; margin-top: 4px; }
+.log-body { flex: 1; }
+.log-title { font-weight: 500; color: var(--text); }
+.log-detail { color: var(--text-2); margin-top: 2px; }
+.log-time { color: var(--text-3); font-family: 'DM Mono', monospace; font-size: 11px; }
+
+/* ── Toast ── */
+.toast { position: fixed; bottom: 24px; right: 24px; z-index: 200; background: var(--text); color: white; border-radius: var(--radius); padding: 13px 18px; font-size: 13px; font-weight: 500; box-shadow: var(--shadow-md); display: flex; align-items: center; gap: 10px; transform: translateY(80px); opacity: 0; transition: all 0.3s cubic-bezier(0.34,1.56,0.64,1); pointer-events: none; max-width: 380px; }
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast-icon { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 11px; }
+
+/* ── Empty ── */
+.empty-state { text-align: center; padding: 60px 20px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); }
+.empty-icon { font-size: 36px; margin-bottom: 12px; opacity: 0.4; }
+.empty-title { font-size: 15px; font-weight: 500; color: var(--text-2); }
+.empty-sub { font-size: 13px; color: var(--text-3); margin-top: 4px; }
+
+@media (max-width: 900px) { .sidebar { display: none; } .main { margin-left: 0; } .stats-row { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-tag">Procurement</div>
+      <div class="logo-name">Build<span class="logo-dot">Pro</span></div>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group-label">Main</div>
+      <div class="nav-item">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="1" width="6" height="6" rx="1" fill="currentColor" opacity=".7"/><rect x="9" y="1" width="6" height="6" rx="1" fill="currentColor" opacity=".4"/><rect x="1" y="9" width="6" height="6" rx="1" fill="currentColor" opacity=".4"/><rect x="9" y="9" width="6" height="6" rx="1" fill="currentColor" opacity=".4"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h8M2 12h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        Material Indent
+        <span class="nav-badge nb-amber">2</span>
+      </div>
+      <div class="nav-item active">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M2 8l3 3 7-7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><rect x="1" y="1" width="14" height="14" rx="2" stroke="currentColor" stroke-width="1.2"/></svg>
+        Approval Workflow
+        <span class="nav-badge nb-purple" id="nav-count">4</span>
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="2" y="1" width="12" height="14" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M5 5h6M5 8h6M5 11h4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+        Purchase Orders
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" stroke-width="1.2"/><path d="M8 5v3.5L10.5 10" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        Quotations
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="2" width="14" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M1 6h14" stroke="currentColor" stroke-width="1.1"/><path d="M5 10h2M9 10h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        Invoices
+        <span class="nav-badge nb-red">2</span>
+      </div>
+      <div class="nav-group-label">Manage</div>
+      <div class="nav-item">
+        <svg viewBox="0 0 16 16" fill="none"><circle cx="6" cy="5" r="3" stroke="currentColor" stroke-width="1.2"/><path d="M1 14c0-2.76 2.24-5 5-5s5 2.24 5 5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+        Vendors
+      </div>
+      <div class="nav-item">
+        <svg viewBox="0 0 16 16" fill="none"><rect x="1" y="8" width="6" height="7" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="9" y="4" width="6" height="11" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="3" y="1" width="10" height="5" rx="1" stroke="currentColor" stroke-width="1.2"/></svg>
+        Inventory
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="user-row">
+        <div class="user-avatar" id="sidebar-avatar">RK</div>
+        <div>
+          <div class="user-name" id="sidebar-name">Ramesh Kumar</div>
+          <div class="user-role" id="sidebar-role">Purchase Manager</div>
+        </div>
+      </div>
+      <div class="role-switch">
+        <div class="role-switch-label">View as role</div>
+        <div class="role-pills">
+          <div class="role-pill active-pm" id="pill-pm" onclick="switchRole('pm')">Purchase Mgr</div>
+          <div class="role-pill" id="pill-dir" onclick="switchRole('director')">Director</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <div>
+          <span class="bc-link">BuildPro</span>
+          <span class="bc-sep">›</span>
+          <span class="bc-current">Approval Workflow</span>
+        </div>
+        <span class="topbar-role-tag tag-pm" id="role-tag">Purchase Manager View</span>
+      </div>
+      <button class="btn" onclick="markAllRead()">
+        <svg viewBox="0 0 14 14" fill="none"><path d="M2 7l3 3 7-7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        Mark all read
+      </button>
+    </div>
+
+    <div class="content">
+      <div class="page-header">
+        <div>
+          <div class="page-title" id="page-title">Pending approvals</div>
+          <div class="page-sub" id="page-sub">Review and act on material indent requests from site engineers.</div>
+        </div>
+        <div style="display:flex;gap:8px" id="sort-wrap">
+          <button class="sort-btn active-sort" onclick="sortBy('priority',this)">By priority</button>
+          <button class="sort-btn" onclick="sortBy('date',this)">By date</button>
+          <button class="sort-btn" onclick="sortBy('value',this)">By value</button>
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-card stat-pending">
+          <div class="stat-label">Pending review</div>
+          <div class="stat-value" id="s-pending">0</div>
+          <div class="stat-sub">Awaiting your action</div>
+        </div>
+        <div class="stat-card stat-escalated">
+          <div class="stat-label">Escalated to director</div>
+          <div class="stat-value" id="s-escalated">0</div>
+          <div class="stat-sub">Above ₹5L threshold</div>
+        </div>
+        <div class="stat-card stat-approved">
+          <div class="stat-label">Approved today</div>
+          <div class="stat-value" id="s-approved">0</div>
+          <div class="stat-sub">Ready for quotation</div>
+        </div>
+        <div class="stat-card stat-rejected">
+          <div class="stat-label">Rejected</div>
+          <div class="stat-value" id="s-rejected">0</div>
+          <div class="stat-sub">Sent back to site</div>
+        </div>
+      </div>
+
+      <!-- Queue -->
+      <div class="queue-header">
+        <div>
+          <div class="queue-title" id="queue-title">Approval queue</div>
+          <div class="queue-sub" id="queue-sub">Sorted by priority · High items first</div>
+        </div>
+      </div>
+      <div id="queue-container"></div>
+
+      <!-- Escalation section (Director only) -->
+      <div class="escalation-section" id="escalation-section" style="display:none">
+        <div class="section-divider">
+          <div class="divider-line"></div>
+          <div class="divider-label">Escalated — director approval required</div>
+          <div class="divider-line"></div>
+        </div>
+        <div id="escalation-container"></div>
+      </div>
+
+      <!-- History -->
+      <div style="margin-top:28px">
+        <div class="section-divider">
+          <div class="divider-line"></div>
+          <div class="divider-label">Recent decisions</div>
+          <div class="divider-line"></div>
+        </div>
+        <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)">
+          <div id="history-log"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Reject modal -->
+<div class="overlay" id="reject-overlay" onclick="handleOverlay(event,'reject-overlay')">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Reject indent</div>
+        <div class="modal-sub" id="reject-modal-sub">Provide a reason for rejection</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('reject-overlay')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label">Rejection reason <span>*</span></label>
+        <select class="form-select" id="reject-reason-select" onchange="updateRejectText()">
+          <option value="">Select a reason</option>
+          <option value="Specification not finalized — pending design confirmation.">Specification not finalized</option>
+          <option value="Sufficient stock available on site. Check inventory before re-raising.">Sufficient stock on site</option>
+          <option value="Budget for this category is exhausted this month. Re-raise next cycle.">Budget exhausted this month</option>
+          <option value="Wrong material specification raised. Please check BOQ and re-submit.">Wrong specification</option>
+          <option value="Duplicate indent already exists for this material.">Duplicate indent</option>
+          <option value="Custom reason (see remarks below).">Other (add custom reason)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Additional remarks</label>
+        <textarea class="form-textarea" id="reject-notes" placeholder="Add any additional details for the site engineer…"></textarea>
+      </div>
+      <div style="background:var(--yellow-bg);border:1px solid var(--yellow-border);border-radius:var(--radius-sm);padding:10px 12px;font-size:12px;color:var(--yellow)">
+        The site engineer will be notified with this reason and can re-raise the indent after addressing it.
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('reject-overlay')">Cancel</button>
+      <button class="btn btn-red" onclick="confirmReject()">Reject indent</button>
+    </div>
+  </div>
+</div>
+
+<!-- Info request modal -->
+<div class="overlay" id="info-overlay" onclick="handleOverlay(event,'info-overlay')">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Request more information</div>
+        <div class="modal-sub" id="info-modal-sub">Ask site engineer for clarification</div>
+      </div>
+      <button class="modal-close" onclick="closeModal('info-overlay')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-group">
+        <label class="form-label" style="margin-bottom:10px">What information do you need?</label>
+        <div>
+          <span class="info-chip" onclick="toggleChip(this)">Brand preference</span>
+          <span class="info-chip" onclick="toggleChip(this)">Exact specifications</span>
+          <span class="info-chip" onclick="toggleChip(this)">Delivery location on site</span>
+          <span class="info-chip" onclick="toggleChip(this)">Justification for quantity</span>
+          <span class="info-chip" onclick="toggleChip(this)">Alternative materials ok?</span>
+          <span class="info-chip" onclick="toggleChip(this)">Date flexibility</span>
+        </div>
+      </div>
+      <div class="form-group" style="margin-bottom:0">
+        <label class="form-label">Additional message</label>
+        <textarea class="form-textarea" id="info-message" placeholder="Write a message to the site engineer…" style="min-height:70px"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('info-overlay')">Cancel</button>
+      <button class="btn btn-purple" onclick="sendInfoRequest()">Send request</button>
+    </div>
+  </div>
+</div>
+
+<!-- Bulk bar -->
+<div class="bulk-bar" id="bulk-bar">
+  <span class="bulk-count" id="bulk-count">0 selected</span>
+  <button class="bulk-btn bulk-approve" onclick="bulkAction('Approved')">Approve all</button>
+  <button class="bulk-btn bulk-reject" onclick="bulkAction('Rejected')">Reject all</button>
+  <button class="bulk-close" onclick="clearSelection()">✕</button>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <div class="toast-icon" id="toast-icon">✓</div>
+  <span id="toast-text">Done</span>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let currentRole = 'pm';
+let pendingRejectId = null;
+let pendingInfoId = null;
+let selected = new Set();
+let sortMode = 'priority';
+
+const ESCALATION_THRESHOLD = 500000; // ₹5L
+
+const BUDGETS = {
+  'Steel & Iron':       { total: 4000000, spent: 3720000 },
+  'Cement & Aggregates':{ total: 1800000, spent: 1640000 },
+  'Sand':               { total: 600000,  spent: 410000  },
+  'Bricks & Blocks':    { total: 800000,  spent: 520000  },
+  'Tiles & Flooring':   { total: 1200000, spent: 880000  },
+  'Electrical':         { total: 600000,  spent: 490000  },
+  'Plumbing':           { total: 500000,  spent: 390000  },
+  'Timber & Wood':      { total: 900000,  spent: 710000  },
+};
+
+const UNIT_RATES = {
+  'TMT Steel 12mm': 60000, 'TMT Steel 16mm': 62000, 'TMT Steel 8mm': 58000,
+  'OPC 53 Grade Cement': 360, 'OPC 43 Grade Cement': 340, 'PPC Cement': 330,
+  'River Sand': 8500, 'M-Sand (Manufactured)': 6000,
+  'AAC Blocks 600mm': 49, 'Clay Bricks (Standard)': 12, 'Cement Solid Blocks': 38,
+  'Vitrified Tiles 2x2': 78, 'Ceramic Wall Tiles': 55,
+  'CPVC Pipes 1 inch': 400, 'UPVC Pipe 4 inch': 650,
+};
+
+let indents = [
+  { id:'IND-087', material:'TMT Steel 12mm',       category:'Steel & Iron',        qty:2.5,  unit:'MT',      date:'2026-04-05', raisedBy:'Suresh (Site Engineer)', priority:'High',   status:'Pending',   notes:'JSW brand preferred, Fe-500 grade',    submitted:'30 Mar 2026, 10:14 AM', project:'Whitefield Residency' },
+  { id:'IND-086', material:'OPC 53 Grade Cement',  category:'Cement & Aggregates', qty:200,  unit:'Bags',    date:'2026-04-08', raisedBy:'Suresh (Site Engineer)', priority:'Medium', status:'Pending',   notes:'ACC or Ultratech only',                submitted:'29 Mar 2026, 3:45 PM',  project:'Whitefield Residency' },
+  { id:'IND-091', material:'River Sand',           category:'Sand',                qty:25,   unit:'Units',   date:'2026-04-06', raisedBy:'Kiran (Site Engineer)',  priority:'High',   status:'Pending',   notes:'Clean river sand, 40mm down',          submitted:'31 Mar 2026, 8:30 AM',  project:'Whitefield Residency' },
+  { id:'IND-090', material:'Vitrified Tiles 2x2',  category:'Tiles & Flooring',    qty:2400, unit:'Sqft',    date:'2026-04-15', raisedBy:'Mohan (Supervisor)',     priority:'Medium', status:'Escalated', notes:'As per interior designer spec sheet #4', submitted:'30 Mar 2026, 2:00 PM',  project:'Whitefield Residency' },
+  { id:'IND-089', material:'TMT Steel 16mm',       category:'Steel & Iron',        qty:10,   unit:'MT',      date:'2026-04-10', raisedBy:'Suresh (Site Engineer)', priority:'High',   status:'Escalated', notes:'Urgent — column casting scheduled Apr 9',submitted:'29 Mar 2026, 11:00 AM', project:'Whitefield Residency' },
+  { id:'IND-088', material:'AAC Blocks 600mm',     category:'Bricks & Blocks',     qty:1200, unit:'Pieces',  date:'2026-04-12', raisedBy:'Kiran (Site Engineer)',  priority:'Low',    status:'Pending',   notes:'',                                     submitted:'28 Mar 2026, 4:15 PM',  project:'Whitefield Residency' },
+];
+
+let history = [
+  { action:'Approved', id:'IND-085', material:'River Sand', by:'Ramesh Kumar', time:'28 Mar 2026, 2:10 PM', note:'Approved for 10 units.' },
+  { action:'Approved', id:'IND-084', material:'CPVC Pipes 1 inch', by:'Ramesh Kumar', time:'25 Mar 2026, 4:00 PM', note:'Approved. Proceed to quotation.' },
+  { action:'Rejected', id:'IND-082', material:'Vitrified Tiles 2x2', by:'Ramesh Kumar', time:'18 Mar 2026, 5:00 PM', note:'Specification not finalized yet.' },
+];
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+function estimateValue(indent) {
+  const rate = UNIT_RATES[indent.material] || 500;
+  return indent.qty * rate;
+}
+
+function formatINR(n) {
+  if (n >= 100000) return '₹' + (n/100000).toFixed(1) + 'L';
+  return '₹' + n.toLocaleString('en-IN');
+}
+
+function formatDate(d) {
+  return new Date(d).toLocaleDateString('en-IN', { day:'2-digit', month:'short', year:'numeric' });
+}
+
+function isOverdue(d) { return new Date(d) < new Date(); }
+
+function priOrder(p) { return p==='High'?0:p==='Medium'?1:2; }
+
+function getBudgetStatus(cat, val) {
+  const b = BUDGETS[cat];
+  if (!b) return null;
+  const remaining = b.total - b.spent;
+  const pct = Math.round((b.spent/b.total)*100);
+  const willExceed = val > remaining;
+  return { remaining, pct, willExceed, total: b.total, spent: b.spent };
+}
+
+function getSorted(list) {
+  return [...list].sort((a,b) => {
+    if (sortMode==='priority') return priOrder(a.priority) - priOrder(b.priority);
+    if (sortMode==='date') return new Date(a.date) - new Date(b.date);
+    if (sortMode==='value') return estimateValue(b) - estimateValue(a);
+    return 0;
+  });
+}
+
+// ── Render ───────────────────────────────────────────────────────────────────
+function renderAll() {
+  updateStats();
+  renderQueue();
+  renderHistory();
+}
+
+function updateStats() {
+  const pending = indents.filter(i=>i.status==='Pending').length;
+  const escalated = indents.filter(i=>i.status==='Escalated').length;
+  const approved = history.filter(h=>h.action==='Approved').length;
+  const rejected = history.filter(h=>h.action==='Rejected').length;
+  document.getElementById('s-pending').textContent = pending;
+  document.getElementById('s-escalated').textContent = escalated;
+  document.getElementById('s-approved').textContent = approved;
+  document.getElementById('s-rejected').textContent = rejected;
+  document.getElementById('nav-count').textContent = pending + escalated;
+}
+
+function renderQueue() {
+  const container = document.getElementById('queue-container');
+  const escContainer = document.getElementById('escalation-container');
+  const escSection = document.getElementById('escalation-section');
+
+  const pending = getSorted(indents.filter(i=>i.status==='Pending'));
+  const escalated = getSorted(indents.filter(i=>i.status==='Escalated'));
+
+  // Director sees both; PM sees pending only
+  const showEsc = currentRole==='director' && escalated.length > 0;
+  escSection.style.display = showEsc ? 'block' : 'none';
+
+  if (!pending.length) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">✅</div><div class="empty-title">All caught up!</div><div class="empty-sub">No pending approvals in your queue.</div></div>`;
+  } else {
+    container.innerHTML = pending.map(i => renderCard(i, false)).join('');
+  }
+
+  if (showEsc) {
+    escContainer.innerHTML = escalated.map(i => renderCard(i, true)).join('');
+  }
+}
+
+function renderCard(indent, isEscalated) {
+  const val = estimateValue(indent);
+  const isHigh = indent.priority === 'High';
+  const cardClass = isEscalated ? 'escalated' : isHigh ? 'high-pri' : '';
+  const checked = selected.has(indent.id);
+  const budget = getBudgetStatus(indent.category, val);
+  const overBudget = budget && budget.willExceed;
+  const budgetPct = budget ? Math.min(budget.pct, 100) : 0;
+  const budgetColor = budgetPct > 85 ? 'var(--red)' : budgetPct > 65 ? 'var(--yellow)' : 'var(--green)';
+  const daysUntil = Math.ceil((new Date(indent.date) - new Date()) / 86400000);
+  const dateLabel = daysUntil < 0 ? `<span style="color:var(--red);font-weight:500">Overdue by ${Math.abs(daysUntil)}d</span>` : daysUntil === 0 ? `<span style="color:var(--yellow);font-weight:500">Due today</span>` : daysUntil <= 3 ? `<span style="color:var(--yellow);font-weight:500">Due in ${daysUntil}d</span>` : `Due ${formatDate(indent.date)}`;
+
+  const priColor = isHigh ? 'var(--red)' : indent.priority==='Medium' ? 'var(--yellow)' : 'var(--text-3)';
+
+  let actionBar = '';
+  if (!isEscalated && currentRole === 'pm') {
+    actionBar = `
+      <div class="card-actions">
+        <button class="action-btn ab-approve" onclick="approveIndent('${indent.id}')">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5l2.5 2.5 5.5-5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Approve
+        </button>
+        <button class="action-btn ab-reject" onclick="openRejectModal('${indent.id}')">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M2 2l7 7M9 2l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Reject
+        </button>
+        ${val >= ESCALATION_THRESHOLD ? `<button class="action-btn ab-escalate" onclick="escalateIndent('${indent.id}')">↑ Escalate to director</button>` : ''}
+        <button class="action-btn ab-info" onclick="openInfoModal('${indent.id}')">Ask for info</button>
+        ${overBudget ? `<span class="escalation-tag" style="background:var(--red-bg);color:var(--red);border:1px solid var(--red-border)">⚠ Over budget</span>` : ''}
+      </div>`;
+  } else if (isEscalated && currentRole === 'director') {
+    actionBar = `
+      <div class="card-actions">
+        <button class="action-btn ab-approve" onclick="approveIndent('${indent.id}')">
+          <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M1.5 5.5l2.5 2.5 5.5-5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Approve (Director)
+        </button>
+        <button class="action-btn ab-reject" onclick="openRejectModal('${indent.id}')">Reject</button>
+        <button class="action-btn ab-info" onclick="openInfoModal('${indent.id}')">Ask for info</button>
+        <span class="escalation-tag" style="background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple-border)">Escalated — requires your sign-off</span>
+      </div>`;
+  }
+
+  return `
+    <div class="indent-card ${cardClass}" id="card-${indent.id}">
+      <div class="card-main">
+        <div class="card-check ${checked?'checked':''}" onclick="toggleSelect('${indent.id}')"></div>
+        <div class="card-body">
+          <div class="card-top">
+            <span class="card-id">${indent.id}</span>
+            <span class="card-material">${indent.material}</span>
+            ${isEscalated ? `<span class="badge badge-escalated">Escalated</span>` : ''}
+          </div>
+          <div class="card-meta">
+            <div class="meta-item">
+              <svg viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1.2"/><path d="M6 3.5V6.5L8 8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+              ${dateLabel}
+            </div>
+            <div class="meta-item">
+              <svg viewBox="0 0 12 12" fill="none"><rect x="1" y="2" width="10" height="9" rx="1.5" stroke="currentColor" stroke-width="1.1"/><path d="M4 1v2M8 1v2M1 6h10" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+              Submitted ${indent.submitted}
+            </div>
+            <div class="meta-item">
+              <svg viewBox="0 0 12 12" fill="none"><circle cx="5" cy="4" r="2.5" stroke="currentColor" stroke-width="1.1"/><path d="M1 11c0-2.2 1.8-4 4-4s4 1.8 4 4" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg>
+              ${indent.raisedBy}
+            </div>
+            <div class="meta-item">
+              <span class="pri-dot" style="background:${priColor}"></span>
+              ${indent.priority} priority · ${indent.qty} ${indent.unit}
+            </div>
+          </div>
+          ${indent.notes ? `<div class="card-notes">"${indent.notes}"</div>` : ''}
+        </div>
+        <div class="card-right">
+          <div class="card-amount">${formatINR(val)}</div>
+          <div class="card-amount-sub">Est. value</div>
+          ${overBudget ? `<div style="font-size:10px;color:var(--red);font-weight:500;text-align:right">Exceeds budget</div>` : ''}
+        </div>
+      </div>
+      <div class="budget-bar">
+        <div class="budget-label">Budget used</div>
+        <div class="budget-track"><div class="budget-fill" style="width:${budgetPct}%;background:${budgetColor}"></div></div>
+        <div class="budget-text">${budgetPct}%</div>
+        ${budget ? `<div style="font-size:11px;color:var(--text-3);margin-left:4px">· ₹${(budget.remaining/100000).toFixed(1)}L remaining in ${indent.category}</div>` : ''}
+      </div>
+      ${actionBar}
+    </div>`;
+}
+
+function renderHistory() {
+  const el = document.getElementById('history-log');
+  if (!history.length) { el.innerHTML = '<div style="padding:20px;text-align:center;font-size:13px;color:var(--text-3)">No decisions yet.</div>'; return; }
+  el.innerHTML = history.slice(0,6).map(h => {
+    const color = h.action==='Approved' ? 'var(--green)' : h.action==='Rejected' ? 'var(--red)' : 'var(--blue)';
+    return `<div class="log-item">
+      <div class="log-dot" style="background:${color}"></div>
+      <div class="log-body">
+        <div class="log-title">${h.action}: ${h.id} — ${h.material}</div>
+        <div class="log-detail">${h.note}</div>
+      </div>
+      <div class="log-time">${h.time}</div>
+    </div>`;
+  }).join('');
+}
+
+// ── Actions ──────────────────────────────────────────────────────────────────
+function approveIndent(id) {
+  const row = indents.find(i=>i.id===id);
+  if (!row) return;
+  const now = nowStr();
+  const approver = currentRole==='director' ? 'Vikram Shah (Director)' : 'Ramesh Kumar (PM)';
+  row.status = 'Approved';
+  history.unshift({ action:'Approved', id, material:row.material, by:approver, time:now, note:`Approved by ${approver}. Ready for quotation.` });
+  animateCardOut(id);
+  setTimeout(()=>{ renderAll(); showToast(`${id} approved ✓`, 'green'); }, 350);
+}
+
+function openRejectModal(id) {
+  pendingRejectId = id;
+  const row = indents.find(i=>i.id===id);
+  document.getElementById('reject-modal-sub').textContent = `${id} · ${row?.material}`;
+  document.getElementById('reject-reason-select').value = '';
+  document.getElementById('reject-notes').value = '';
+  document.getElementById('reject-overlay').classList.add('open');
+}
+
+function confirmReject() {
+  const reason = document.getElementById('reject-reason-select').value;
+  const notes = document.getElementById('reject-notes').value.trim();
+  if (!reason) { showToast('Please select a rejection reason','yellow'); return; }
+  const row = indents.find(i=>i.id===pendingRejectId);
+  if (!row) return;
+  const now = nowStr();
+  const fullReason = reason + (notes ? ' ' + notes : '');
+  row.status = 'Rejected';
+  row.rejectReason = fullReason;
+  history.unshift({ action:'Rejected', id:pendingRejectId, material:row.material, by:'Ramesh Kumar', time:now, note:fullReason });
+  closeModal('reject-overlay');
+  animateCardOut(pendingRejectId);
+  setTimeout(()=>{ renderAll(); showToast(`${pendingRejectId} rejected — site engineer notified`, 'red'); }, 350);
+}
+
+function escalateIndent(id) {
+  const row = indents.find(i=>i.id===id);
+  if (!row) return;
+  row.status = 'Escalated';
+  history.unshift({ action:'Escalated', id, material:row.material, by:'Ramesh Kumar', time:nowStr(), note:`Escalated to director — value ${formatINR(estimateValue(row))} exceeds threshold.` });
+  animateCardOut(id);
+  setTimeout(()=>{ renderAll(); showToast(`${id} escalated to Director for sign-off`, 'purple'); }, 350);
+}
+
+function openInfoModal(id) {
+  pendingInfoId = id;
+  const row = indents.find(i=>i.id===id);
+  document.getElementById('info-modal-sub').textContent = `${id} · ${row?.material}`;
+  document.getElementById('info-message').value = '';
+  document.querySelectorAll('.info-chip').forEach(c=>c.classList.remove('selected'));
+  document.getElementById('info-overlay').classList.add('open');
+}
+
+function sendInfoRequest() {
+  const chips = [...document.querySelectorAll('.info-chip.selected')].map(c=>c.textContent).join(', ');
+  const msg = document.getElementById('info-message').value.trim();
+  const row = indents.find(i=>i.id===pendingInfoId);
+  history.unshift({ action:'Info requested', id:pendingInfoId, material:row?.material||'', by:'Ramesh Kumar', time:nowStr(), note:`Asked for: ${chips||'custom message'}. ${msg}` });
+  closeModal('info-overlay');
+  renderHistory(); updateStats();
+  showToast(`Info request sent to ${row?.raisedBy?.split(' (')[0]}`, 'blue');
+}
+
+function toggleSelect(id) {
+  if (selected.has(id)) selected.delete(id);
+  else selected.add(id);
+  const card = document.getElementById('card-'+id);
+  if (card) {
+    const check = card.querySelector('.card-check');
+    if (check) check.classList.toggle('checked', selected.has(id));
+  }
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-bar');
+  document.getElementById('bulk-count').textContent = selected.size + ' selected';
+  bar.classList.toggle('show', selected.size > 0);
+}
+
+function bulkAction(status) {
+  const ids = [...selected];
+  const now = nowStr();
+  ids.forEach(id => {
+    const row = indents.find(i=>i.id===id);
+    if (row && (row.status==='Pending'||row.status==='Escalated')) {
+      row.status = status;
+      history.unshift({ action:status, id, material:row.material, by:'Ramesh Kumar', time:now, note:`Bulk ${status.toLowerCase()} action.` });
+    }
+  });
+  clearSelection();
+  setTimeout(()=>{ renderAll(); showToast(`${ids.length} indent(s) ${status.toLowerCase()}`, status==='Approved'?'green':'red'); }, 200);
+}
+
+function clearSelection() {
+  selected.clear();
+  updateBulkBar();
+  document.querySelectorAll('.card-check').forEach(c=>c.classList.remove('checked'));
+}
+
+function markAllRead() { showToast('All notifications marked as read', 'blue'); }
+
+function sortBy(mode, btn) {
+  sortMode = mode;
+  document.querySelectorAll('.sort-btn').forEach(b=>b.classList.remove('active-sort'));
+  btn.classList.add('active-sort');
+  const labels = { priority:'Sorted by priority · High items first', date:'Sorted by required date · Earliest first', value:'Sorted by estimated value · Highest first' };
+  document.getElementById('queue-sub').textContent = labels[mode];
+  renderQueue();
+}
+
+// ── Role switch ──────────────────────────────────────────────────────────────
+function switchRole(role) {
+  currentRole = role;
+  const isDir = role === 'director';
+  document.getElementById('sidebar-avatar').className = 'user-avatar ' + (isDir ? 'ua-dir' : 'ua-pm');
+  document.getElementById('sidebar-avatar').textContent = isDir ? 'VS' : 'RK';
+  document.getElementById('sidebar-name').textContent = isDir ? 'Vikram Shah' : 'Ramesh Kumar';
+  document.getElementById('sidebar-role').textContent = isDir ? 'Director' : 'Purchase Manager';
+  document.getElementById('role-tag').textContent = isDir ? 'Director View' : 'Purchase Manager View';
+  document.getElementById('role-tag').className = 'topbar-role-tag ' + (isDir ? 'tag-dir' : 'tag-pm');
+  document.getElementById('page-title').textContent = isDir ? 'Director approvals' : 'Pending approvals';
+  document.getElementById('page-sub').textContent = isDir ? 'Review escalated high-value indents requiring your authorization.' : 'Review and act on material indent requests from site engineers.';
+  document.getElementById('pill-pm').className = 'role-pill' + (isDir ? '' : ' active-pm');
+  document.getElementById('pill-dir').className = 'role-pill' + (isDir ? ' active-dir' : '');
+  renderAll();
+}
+
+// ── Utils ────────────────────────────────────────────────────────────────────
+function nowStr() {
+  const n = new Date();
+  return n.toLocaleDateString('en-IN',{day:'2-digit',month:'short',year:'numeric'}) + ', ' + n.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'});
+}
+
+function animateCardOut(id) {
+  const card = document.getElementById('card-'+id);
+  if (card) { card.style.transition='all 0.3s'; card.style.opacity='0'; card.style.transform='translateX(20px)'; }
+}
+
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function handleOverlay(e, id) { if (e.target===document.getElementById(id)) closeModal(id); }
+function toggleChip(el) { el.classList.toggle('selected'); }
+
+function updateRejectText() {
+  const val = document.getElementById('reject-reason-select').value;
+  if (val && val !== 'Custom reason (see remarks below).') {
+    document.getElementById('reject-notes').placeholder = 'Add additional context if needed…';
+  }
+}
+
+function showToast(msg, type='green') {
+  const t = document.getElementById('toast');
+  const ico = document.getElementById('toast-icon');
+  document.getElementById('toast-text').textContent = msg;
+  const configs = {
+    green: { bg:'var(--green)', icon:'✓' }, red: { bg:'var(--red)', icon:'✕' },
+    yellow: { bg:'var(--yellow)', icon:'!' }, blue: { bg:'var(--blue)', icon:'ℹ' },
+    purple: { bg:'var(--purple)', icon:'↑' }
+  };
+  const c = configs[type]||configs.green;
+  t.style.background = c.bg; ico.textContent = c.icon;
+  t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 3500);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key==='Escape') { closeModal('reject-overlay'); closeModal('info-overlay'); clearSelection(); }
+});
+
+renderAll();
+</script>
+</body>
+</html>
