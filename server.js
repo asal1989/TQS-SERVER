@@ -2474,6 +2474,1073 @@ app.get('/api/stock-alerts', (req, res) => {
   } catch(e) { res.status(500).json({ ok:false, error:e.message }); }
 });
 
+// ══════════════════════════════════════════════════════
+// DASHBOARD & ANALYTICS MODULE
+// ══════════════════════════════════════════════════════
+
+// SQL expression to normalise DD-MM-YYYY or YYYY-MM-DD dates to YYYY-MM-DD for julianday()
+const SQL_DATE_NORM = `
+  CASE
+    WHEN {col} LIKE '__-__-____'
+    THEN substr({col},7,4)||'-'||substr({col},4,2)||'-'||substr({col},1,2)
+    ELSE {col}
+  END`;
+
+function normDate(col) {
+  return SQL_DATE_NORM.replace(/\{col\}/g, col);
+}
+
+// Helper: parse optional date-range & vendor/project filters from query string
+function buildBillFilters(req) {
+  const conditions = ['b.is_deleted = 0'];
+  const params = [];
+
+  // Project scoping (same pattern as /api/bills)
+  if (req.projectId) {
+    conditions.push('b.project_id = ?');
+    params.push(req.projectId);
+  }
+
+  // Optional date range on inv_date
+  if (req.query.from) { conditions.push("b.inv_date >= ?"); params.push(req.query.from); }
+  if (req.query.to)   { conditions.push("b.inv_date <= ?"); params.push(req.query.to); }
+
+  // Optional vendor filter
+  if (req.query.vendor) { conditions.push("LOWER(b.vendor) = LOWER(?)"); params.push(req.query.vendor); }
+
+  // Optional tracker_type filter (po / wo)
+  if (req.query.type === 'po' || req.query.type === 'wo') {
+    conditions.push('b.tracker_type = ?'); params.push(req.query.type);
+  }
+
+  // Optional payment_status filter
+  if (req.query.status) { conditions.push("LOWER(COALESCE(u.payment_status,'')) = LOWER(?)"); params.push(req.query.status); }
+
+  return { where: conditions.join(' AND '), params };
+}
+
+// ── DASHBOARD SUMMARY ──
+
+// GET /api/dashboard/summary — all key metrics in one call
+app.get('/api/dashboard/summary', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const base = pid ? 'b.is_deleted=0 AND b.project_id=?' : 'b.is_deleted=0';
+    const bp   = pid ? [pid] : [];
+
+    const totals = query(`
+      SELECT
+        COUNT(*) AS total_bills,
+        COALESCE(SUM(b.total_amount),0) AS total_value,
+        COALESCE(SUM(CASE WHEN COALESCE(u.payment_status,'')='Paid' THEN b.total_amount ELSE 0 END),0) AS paid_value,
+        COALESCE(SUM(CASE WHEN COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled') THEN COALESCE(u.balance_to_pay, b.total_amount) ELSE 0 END),0) AS outstanding_amount,
+        COALESCE(SUM(COALESCE(u.certified_net,0)),0) AS total_certified,
+        COALESCE(SUM(b.gst_amount),0) AS total_gst,
+        COUNT(CASE WHEN COALESCE(u.payment_status,'') = '' OR u.sl IS NULL THEN 1 END) AS pending_approval,
+        COUNT(CASE WHEN COALESCE(u.payment_status,'') = 'Paid' THEN 1 END) AS paid_count,
+        COUNT(CASE WHEN COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled') AND COALESCE(u.payment_status,'') != '' THEN 1 END) AS unpaid_count
+      FROM bills b
+      LEFT JOIN bill_updates u ON b.sl = u.sl
+      WHERE ${base}`, bp);
+
+    const overdue = query(`
+      SELECT COUNT(*) AS overdue_bills,
+             COALESCE(SUM(COALESCE(u.balance_to_pay,b.total_amount)),0) AS overdue_amount
+      FROM bills b
+      LEFT JOIN bill_updates u ON b.sl = u.sl
+      WHERE ${base}
+        AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')
+        AND b.inv_date != ''
+        AND julianday('now') - julianday(
+              ${normDate('b.inv_date')}
+            ) > 30`, bp);
+
+    const avgPay = query(`
+      SELECT AVG(
+        julianday(
+          ${normDate('u.payment_date')}
+        ) -
+        julianday(
+          ${normDate('b.inv_date')}
+        )
+      ) AS avg_payment_days
+      FROM bills b
+      JOIN bill_updates u ON b.sl = u.sl
+      WHERE ${base}
+        AND u.payment_date != ''
+        AND b.inv_date != ''`, bp);
+
+    const stockAlerts = query(`SELECT COUNT(*) AS cnt FROM stock_items WHERE is_active=1 AND reorder_qty>0 AND current_qty<=reorder_qty`);
+    const vendorCount = query(`SELECT COUNT(*) AS cnt FROM vendors WHERE is_active=1`);
+    const poStats = query(`
+      SELECT COUNT(*) AS po_count,
+             COALESCE(SUM(po_value),0) AS po_value
+      FROM purchase_orders
+      WHERE ${pid ? 'project_id=?' : '1=1'}`, pid ? [pid] : []);
+
+    res.json({
+      ok: true,
+      summary: {
+        ...totals[0],
+        ...overdue[0],
+        avg_payment_days: Math.round((avgPay[0].avg_payment_days || 0) * 10) / 10,
+        stock_alerts: stockAlerts[0].cnt,
+        active_vendors: vendorCount[0].cnt,
+        ...poStats[0],
+      }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/dashboard/metrics — individual metric cards
+app.get('/api/dashboard/metrics', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const base = pid ? 'b.is_deleted=0 AND b.project_id=?' : 'b.is_deleted=0';
+    const bp   = pid ? [pid] : [];
+
+    const bills = query(`
+      SELECT
+        COUNT(*) AS total_bills,
+        COALESCE(SUM(b.total_amount),0) AS total_value,
+        COALESCE(SUM(CASE WHEN COALESCE(u.payment_status,'')='Paid' THEN COALESCE(u.paid_amount,0) ELSE 0 END),0) AS total_paid,
+        COALESCE(SUM(CASE WHEN COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled') THEN COALESCE(u.balance_to_pay,b.total_amount) ELSE 0 END),0) AS outstanding,
+        COALESCE(SUM(COALESCE(u.certified_net,0)),0) AS certified,
+        COALESCE(SUM(COALESCE(u.tds_deduction,0)),0) AS total_tds,
+        COALESCE(SUM(COALESCE(u.advance_recovered,0)),0) AS total_advance_recovered,
+        COUNT(CASE WHEN COALESCE(u.payment_status,'') = '' OR u.sl IS NULL THEN 1 END) AS pending_approval,
+        COUNT(CASE WHEN COALESCE(u.payment_status,'')='Paid' THEN 1 END) AS paid_count
+      FROM bills b LEFT JOIN bill_updates u ON b.sl = u.sl WHERE ${base}`, bp);
+
+    const overdue30 = query(`
+      SELECT COUNT(*) AS cnt,
+             COALESCE(SUM(COALESCE(u.balance_to_pay,b.total_amount)),0) AS amt
+      FROM bills b LEFT JOIN bill_updates u ON b.sl = u.sl
+      WHERE ${base}
+        AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')
+        AND b.inv_date != ''
+        AND julianday('now') - julianday(
+            ${normDate('b.inv_date')}) > 30`, bp);
+
+    res.json({
+      ok: true,
+      metrics: {
+        total_bills:            { value: bills[0].total_bills,     label: 'Total Bills' },
+        total_value:            { value: bills[0].total_value,     label: 'Total Bill Value (₹)' },
+        outstanding:            { value: bills[0].outstanding,     label: 'Outstanding Amount (₹)' },
+        certified:              { value: bills[0].certified,       label: 'Total Certified (₹)' },
+        total_paid:             { value: bills[0].total_paid,      label: 'Total Paid (₹)' },
+        pending_approval:       { value: bills[0].pending_approval,label: 'Bills Pending Approval' },
+        overdue_bills:          { value: overdue30[0].cnt,         label: 'Overdue Bills (>30 days)' },
+        overdue_amount:         { value: overdue30[0].amt,         label: 'Overdue Amount (₹)' },
+        total_tds:              { value: bills[0].total_tds,       label: 'Total TDS Deducted (₹)' },
+        total_advance_recovered:{ value: bills[0].total_advance_recovered, label: 'Advance Recovered (₹)' },
+      }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/dashboard/quick-stats — lightweight widget
+app.get('/api/dashboard/quick-stats', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const bp  = pid ? [pid] : [];
+    const pw  = pid ? 'AND b.project_id=?' : '';
+
+    const r = query(`
+      SELECT
+        COUNT(*) AS total_bills,
+        COALESCE(SUM(b.total_amount),0) AS total_value,
+        COUNT(CASE WHEN COALESCE(u.payment_status,'')='Paid' THEN 1 END) AS paid,
+        COUNT(CASE WHEN COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled') AND COALESCE(u.payment_status,'')!='' THEN 1 END) AS pending,
+        COUNT(CASE WHEN u.sl IS NULL OR COALESCE(u.payment_status,'')='' THEN 1 END) AS new_bills
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}`, bp);
+    const alerts = query(`SELECT COUNT(*) AS cnt FROM stock_items WHERE is_active=1 AND reorder_qty>0 AND current_qty<=reorder_qty`);
+
+    res.json({ ok: true, stats: { ...r[0], stock_alerts: alerts[0].cnt } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── FINANCIAL ANALYTICS ──
+
+// GET /api/analytics/financials — financial summaries
+app.get('/api/analytics/financials', (req, res) => {
+  try {
+    const { where, params } = buildBillFilters(req);
+    const summary = query(`
+      SELECT
+        COUNT(*) AS total_bills,
+        COALESCE(SUM(b.basic_amount),0) AS total_basic,
+        COALESCE(SUM(b.gst_amount),0) AS total_gst,
+        COALESCE(SUM(b.transport_charges),0) AS total_transport,
+        COALESCE(SUM(b.other_charges),0) AS total_other_charges,
+        COALESCE(SUM(b.total_amount),0) AS total_invoice,
+        COALESCE(SUM(COALESCE(u.qs_gross,0)),0) AS total_qs_gross,
+        COALESCE(SUM(COALESCE(u.certified_net,0)),0) AS total_certified_net,
+        COALESCE(SUM(COALESCE(u.paid_amount,0)),0) AS total_paid,
+        COALESCE(SUM(COALESCE(u.balance_to_pay,0)),0) AS total_balance,
+        COALESCE(SUM(COALESCE(u.tds_deduction,0)),0) AS total_tds,
+        COALESCE(SUM(COALESCE(u.advance_recovered,0)),0) AS total_advance_recovered,
+        COALESCE(SUM(COALESCE(u.retention_money,0)),0) AS total_retention,
+        COALESCE(SUM(COALESCE(u.other_deductions,0)),0) AS total_other_deductions,
+        COALESCE(SUM(b.cgst_amt),0) AS total_cgst,
+        COALESCE(SUM(b.sgst_amt),0) AS total_sgst,
+        COALESCE(SUM(b.igst_amt),0) AS total_igst
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE ${where}`, params);
+
+    const poSummary = query(`
+      SELECT COUNT(*) AS po_count,
+             COALESCE(SUM(po_value),0) AS total_po_value,
+             COUNT(CASE WHEN status='Closed' THEN 1 END) AS closed_pos,
+             COUNT(CASE WHEN status='Active' THEN 1 END) AS active_pos
+      FROM purchase_orders
+      WHERE ${req.projectId ? 'project_id=?' : '1=1'}`,
+      req.projectId ? [req.projectId] : []);
+
+    res.json({ ok: true, financials: summary[0], po_summary: poSummary[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/monthly-trends — last 12 months of bill data
+app.get('/api/analytics/monthly-trends', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    // Bills created per month (last 12 months)
+    const trends = query(`
+      SELECT
+        strftime('%Y-%m', b.created_at) AS month,
+        COUNT(*) AS bill_count,
+        COALESCE(SUM(b.total_amount),0) AS total_value,
+        COALESCE(SUM(b.basic_amount),0) AS basic_value,
+        COALESCE(SUM(b.gst_amount),0) AS gst_value,
+        COALESCE(SUM(COALESCE(u.paid_amount,0)),0) AS paid_value
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+        AND b.created_at >= date('now','-12 months')
+      GROUP BY month
+      ORDER BY month ASC`, pp);
+
+    // Invoice month trends (by inv_month or derived from inv_date)
+    const invTrends = query(`
+      SELECT
+        CASE
+          WHEN b.inv_date LIKE '____-__-%' THEN substr(b.inv_date,1,7)
+          WHEN b.inv_date LIKE '__-__-____' THEN substr(b.inv_date,7,4)||'-'||substr(b.inv_date,4,2)
+          ELSE 'Unknown'
+        END AS inv_month,
+        COUNT(*) AS bill_count,
+        COALESCE(SUM(b.total_amount),0) AS total_value
+      FROM bills b
+      WHERE b.is_deleted=0 ${pw} AND b.inv_date != ''
+        AND (
+          (b.inv_date LIKE '____-__-%' AND b.inv_date >= date('now','-12 months'))
+          OR
+          (b.inv_date LIKE '__-__-____' AND
+            substr(b.inv_date,7,4)||'-'||substr(b.inv_date,4,2) >= strftime('%Y-%m', date('now','-12 months')))
+        )
+      GROUP BY inv_month
+      ORDER BY inv_month ASC`, pp);
+
+    res.json({ ok: true, monthly_trends: trends, invoice_trends: invTrends });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/payment-status — payment status breakdown
+app.get('/api/analytics/payment-status', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    const breakdown = query(`
+      SELECT
+        CASE
+          WHEN u.sl IS NULL OR COALESCE(u.payment_status,'') = '' THEN 'Not Started'
+          ELSE u.payment_status
+        END AS status,
+        COUNT(*) AS count,
+        COALESCE(SUM(b.total_amount),0) AS total_value,
+        COALESCE(SUM(COALESCE(u.paid_amount,0)),0) AS paid_amount,
+        COALESCE(SUM(COALESCE(u.balance_to_pay,0)),0) AS balance
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+      GROUP BY status
+      ORDER BY count DESC`, pp);
+
+    res.json({ ok: true, payment_status: breakdown });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/gst-summary — GST analytics
+app.get('/api/analytics/gst-summary', (req, res) => {
+  try {
+    const { where, params } = buildBillFilters(req);
+    const gst = query(`
+      SELECT
+        COALESCE(SUM(b.gst_amount),0) AS total_gst,
+        COALESCE(SUM(b.cgst_amt),0) AS total_cgst,
+        COALESCE(SUM(b.sgst_amt),0) AS total_sgst,
+        COALESCE(SUM(b.igst_amt),0) AS total_igst,
+        COALESCE(SUM(b.basic_amount),0) AS total_basic,
+        COUNT(CASE WHEN b.cgst_amt > 0 THEN 1 END) AS cgst_bills,
+        COUNT(CASE WHEN b.igst_amt > 0 THEN 1 END) AS igst_bills,
+        COUNT(CASE WHEN b.gst_amount = 0 THEN 1 END) AS zero_gst_bills
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE ${where}`, params);
+
+    // GST by vendor (top 10)
+    const byVendor = query(`
+      SELECT b.vendor,
+             COALESCE(SUM(b.gst_amount),0) AS gst_total,
+             COALESCE(SUM(b.total_amount),0) AS invoice_total,
+             COUNT(*) AS bill_count
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE ${where}
+      GROUP BY b.vendor
+      ORDER BY gst_total DESC
+      LIMIT 10`, params);
+
+    res.json({ ok: true, gst_summary: gst[0], gst_by_vendor: byVendor });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── BILL ANALYTICS ──
+
+// GET /api/analytics/bill-aging — aging report (0-30, 30-60, 60-90, 90+ days)
+app.get('/api/analytics/bill-aging', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    const aging = query(`
+      SELECT
+        CASE
+          WHEN age <= 30  THEN '0-30 days'
+          WHEN age <= 60  THEN '31-60 days'
+          WHEN age <= 90  THEN '61-90 days'
+          ELSE '90+ days'
+        END AS bucket,
+        COUNT(*) AS bill_count,
+        COALESCE(SUM(total_amount),0) AS total_value,
+        COALESCE(SUM(balance),0) AS outstanding
+      FROM (
+        SELECT b.total_amount,
+               COALESCE(u.balance_to_pay, b.total_amount) AS balance,
+               CAST(julianday('now') - julianday(
+                 ${normDate('b.inv_date')}
+               ) AS INTEGER) AS age
+        FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+        WHERE b.is_deleted=0 ${pw}
+          AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')
+          AND b.inv_date != ''
+      ) t
+      GROUP BY bucket
+      ORDER BY
+        CASE bucket
+          WHEN '0-30 days'  THEN 1
+          WHEN '31-60 days' THEN 2
+          WHEN '61-90 days' THEN 3
+          ELSE 4
+        END`, pp);
+
+    // Detailed list of overdue bills (>30 days)
+    const overdueList = query(`
+      SELECT b.sl, b.vendor, b.inv_number, b.inv_date, b.total_amount,
+             COALESCE(u.balance_to_pay, b.total_amount) AS balance,
+             COALESCE(u.payment_status,'Pending') AS payment_status,
+             CAST(julianday('now') - julianday(
+               ${normDate('b.inv_date')}
+             ) AS INTEGER) AS age_days
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+        AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')
+        AND b.inv_date != ''
+        AND julianday('now') - julianday(
+          ${normDate('b.inv_date')}) > 30
+      ORDER BY age_days DESC
+      LIMIT 50`, pp);
+
+    res.json({ ok: true, aging_buckets: aging, overdue_bills: overdueList });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/top-vendors — vendor rankings by bill count & value
+app.get('/api/analytics/top-vendors', (req, res) => {
+  try {
+    const { where, params } = buildBillFilters(req);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 10), 50);
+
+    const byValue = query(`
+      SELECT b.vendor,
+             COUNT(*) AS bill_count,
+             COALESCE(SUM(b.total_amount),0) AS total_value,
+             COALESCE(SUM(b.basic_amount),0) AS basic_value,
+             COALESCE(SUM(b.gst_amount),0) AS gst_value,
+             COALESCE(SUM(COALESCE(u.paid_amount,0)),0) AS paid_amount,
+             COALESCE(SUM(COALESCE(u.balance_to_pay,0)),0) AS balance,
+             COALESCE(AVG(b.total_amount),0) AS avg_invoice
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE ${where}
+      GROUP BY b.vendor
+      ORDER BY total_value DESC
+      LIMIT ?`, [...params, limit]);
+
+    res.json({ ok: true, top_vendors: byValue });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/top-projects — project spending
+app.get('/api/analytics/top-projects', (req, res) => {
+  try {
+    const rows = query(`
+      SELECT p.id, p.name, p.code,
+             COUNT(b.sl) AS bill_count,
+             COALESCE(SUM(b.total_amount),0) AS total_value,
+             COALESCE(SUM(COALESCE(u.paid_amount,0)),0) AS paid_amount,
+             COALESCE(SUM(COALESCE(u.balance_to_pay,0)),0) AS balance
+      FROM projects p
+      LEFT JOIN bills b ON b.project_id=p.id AND b.is_deleted=0
+      LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE p.is_active=1
+      GROUP BY p.id
+      ORDER BY total_value DESC`);
+    res.json({ ok: true, projects: rows });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/processing-time — bill processing time metrics
+app.get('/api/analytics/processing-time', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    const times = query(`
+      SELECT
+        AVG(CASE WHEN u.store_handover_date!='' AND b.received_date!=''
+            THEN julianday(
+              ${normDate('u.store_handover_date')})
+            - julianday(
+              ${normDate('b.received_date')})
+            END) AS avg_store_to_handover_days,
+        AVG(CASE WHEN u.qs_certified_date!='' AND u.qs_received_date!=''
+            THEN julianday(
+              ${normDate('u.qs_certified_date')})
+            - julianday(
+              ${normDate('u.qs_received_date')})
+            END) AS avg_qs_cert_days,
+        AVG(CASE WHEN u.payment_date!='' AND b.inv_date!=''
+            THEN julianday(
+              ${normDate('u.payment_date')})
+            - julianday(
+              ${normDate('b.inv_date')})
+            END) AS avg_payment_days,
+        AVG(CASE WHEN u.mgmt_approval_date!='' AND u.proc_date!=''
+            THEN julianday(
+              ${normDate('u.mgmt_approval_date')})
+            - julianday(
+              ${normDate('u.proc_date')})
+            END) AS avg_approval_days
+      FROM bills b JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}`, pp);
+
+    const r = times[0];
+    res.json({
+      ok: true,
+      processing_times: {
+        avg_store_to_handover_days: Math.round((r.avg_store_to_handover_days || 0) * 10) / 10,
+        avg_qs_cert_days:           Math.round((r.avg_qs_cert_days || 0) * 10) / 10,
+        avg_payment_days:           Math.round((r.avg_payment_days || 0) * 10) / 10,
+        avg_approval_days:          Math.round((r.avg_approval_days || 0) * 10) / 10,
+      }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── VENDOR ANALYTICS ──
+
+// GET /api/analytics/vendor-performance — vendor scorecard
+app.get('/api/analytics/vendor-performance', (req, res) => {
+  try {
+    const { where, params } = buildBillFilters(req);
+    const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 20), 100);
+
+    const perf = query(`
+      SELECT b.vendor,
+             COUNT(*) AS total_bills,
+             COALESCE(SUM(b.total_amount),0) AS total_spend,
+             COALESCE(AVG(b.total_amount),0) AS avg_invoice,
+             COUNT(CASE WHEN COALESCE(u.shortage_flag,0)=1 THEN 1 END) AS shortage_count,
+             COUNT(CASE WHEN COALESCE(u.inspection_status,'')='Rejected' THEN 1 END) AS rejection_count,
+             COUNT(CASE WHEN COALESCE(u.payment_status,'')='Paid' THEN 1 END) AS paid_bills,
+             COALESCE(SUM(COALESCE(u.paid_amount,0)),0) AS total_paid,
+             COALESCE(SUM(COALESCE(u.balance_to_pay,0)),0) AS total_balance,
+             COALESCE(SUM(b.gst_amount),0) AS total_gst
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE ${where}
+      GROUP BY b.vendor
+      ORDER BY total_spend DESC
+      LIMIT ?`, [...params, limit]);
+
+    // Compute on-time rate
+    const result = perf.map(v => ({
+      ...v,
+      on_time_rate: v.total_bills > 0
+        ? Math.round(((v.total_bills - v.shortage_count - v.rejection_count) / v.total_bills) * 100)
+        : 100,
+      payment_rate: v.total_bills > 0
+        ? Math.round((v.paid_bills / v.total_bills) * 100)
+        : 0,
+    }));
+
+    res.json({ ok: true, vendor_performance: result });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/vendor/:id/stats — individual vendor stats
+app.get('/api/analytics/vendor/:id/stats', (req, res) => {
+  try {
+    const vendorId = parseInt(req.params.id);
+    const vendor = query(`SELECT * FROM vendors WHERE id=?`, [vendorId]);
+    if (!vendor.length) return res.status(404).json({ ok: false, error: 'Vendor not found' });
+
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    const stats = query(`
+      SELECT
+        COUNT(*) AS total_bills,
+        COALESCE(SUM(b.total_amount),0) AS total_spend,
+        COALESCE(SUM(b.basic_amount),0) AS total_basic,
+        COALESCE(SUM(b.gst_amount),0) AS total_gst,
+        COALESCE(AVG(b.total_amount),0) AS avg_invoice,
+        COALESCE(SUM(COALESCE(u.paid_amount,0)),0) AS total_paid,
+        COALESCE(SUM(COALESCE(u.balance_to_pay,0)),0) AS total_balance,
+        COALESCE(SUM(COALESCE(u.tds_deduction,0)),0) AS total_tds,
+        COUNT(CASE WHEN COALESCE(u.shortage_flag,0)=1 THEN 1 END) AS shortages,
+        COUNT(CASE WHEN COALESCE(u.inspection_status,'')='Rejected' THEN 1 END) AS rejections,
+        COUNT(CASE WHEN COALESCE(u.payment_status,'')='Paid' THEN 1 END) AS paid_count
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 AND LOWER(b.vendor)=LOWER(?) ${pw}`,
+      [vendor[0].name, ...pp]);
+
+    const monthlyTrend = query(`
+      SELECT strftime('%Y-%m', b.created_at) AS month,
+             COUNT(*) AS bill_count,
+             COALESCE(SUM(b.total_amount),0) AS value
+      FROM bills b
+      WHERE b.is_deleted=0 AND LOWER(b.vendor)=LOWER(?) ${pw}
+        AND b.created_at >= date('now','-12 months')
+      GROUP BY month ORDER BY month ASC`,
+      [vendor[0].name, ...pp]);
+
+    res.json({
+      ok: true,
+      vendor: vendor[0],
+      stats: stats[0],
+      monthly_trend: monthlyTrend,
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── APPROVAL ANALYTICS ──
+
+// GET /api/analytics/approval-metrics — approval statistics
+app.get('/api/analytics/approval-metrics', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    const stages = query(`
+      SELECT
+        COUNT(*) AS total,
+        COUNT(CASE WHEN u.sl IS NULL THEN 1 END) AS at_entry,
+        COUNT(CASE WHEN u.sl IS NOT NULL AND COALESCE(u.store_handover_date,'')='' THEN 1 END) AS at_stores,
+        COUNT(CASE WHEN COALESCE(u.store_handover_date,'')!='' AND COALESCE(u.qs_received_date,'')='' THEN 1 END) AS at_doc_ctrl,
+        COUNT(CASE WHEN COALESCE(u.qs_received_date,'')!='' AND COALESCE(u.qs_certified_date,'')='' THEN 1 END) AS at_qs,
+        COUNT(CASE WHEN COALESCE(u.qs_certified_date,'')!='' AND COALESCE(u.proc_date,'')='' THEN 1 END) AS at_procurement,
+        COUNT(CASE WHEN COALESCE(u.proc_date,'')!='' AND COALESCE(u.mgmt_approval_date,'')='' THEN 1 END) AS awaiting_mgmt,
+        COUNT(CASE WHEN COALESCE(u.mgmt_approval_date,'')!='' AND COALESCE(u.accts_jv_date,'')='' THEN 1 END) AS at_accounts,
+        COUNT(CASE WHEN COALESCE(u.payment_status,'')='Paid' THEN 1 END) AS completed
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}`, pp);
+
+    const approval_rate = stages[0].total > 0
+      ? Math.round((stages[0].completed / stages[0].total) * 100)
+      : 0;
+
+    res.json({ ok: true, approval_stages: stages[0], approval_rate });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/approval-bottlenecks — workflow bottleneck identification
+app.get('/api/analytics/approval-bottlenecks', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    // Bills stuck at each stage for > 7 days
+    const stuck = query(`
+      SELECT
+        'Stores Handover' AS stage,
+        COUNT(*) AS stuck_count,
+        AVG(julianday('now') - julianday(b.created_at)) AS avg_wait_days
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+        AND u.sl IS NOT NULL
+        AND COALESCE(u.store_handover_date,'')=''
+        AND julianday('now') - julianday(b.created_at) > 7
+      UNION ALL
+      SELECT
+        'QS Certification' AS stage,
+        COUNT(*) AS stuck_count,
+        AVG(julianday('now') - julianday(
+          ${normDate('u.qs_received_date')})) AS avg_wait_days
+      FROM bills b JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+        AND COALESCE(u.qs_received_date,'')!=''
+        AND COALESCE(u.qs_certified_date,'')=''
+        AND julianday('now') - julianday(
+          ${normDate('u.qs_received_date')}) > 7
+      UNION ALL
+      SELECT
+        'Management Approval' AS stage,
+        COUNT(*) AS stuck_count,
+        AVG(julianday('now') - julianday(
+          ${normDate('u.proc_date')})) AS avg_wait_days
+      FROM bills b JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+        AND COALESCE(u.proc_date,'')!=''
+        AND COALESCE(u.mgmt_approval_date,'')=''
+        AND julianday('now') - julianday(
+          ${normDate('u.proc_date')}) > 7`, [...pp, ...pp, ...pp]);
+
+    res.json({
+      ok: true,
+      bottlenecks: stuck.map(s => ({
+        ...s,
+        avg_wait_days: Math.round((s.avg_wait_days || 0) * 10) / 10
+      }))
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/pending-approvals — pending items by stage
+app.get('/api/analytics/pending-approvals', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    const page    = Math.max(1, parseInt(req.query.page) || 1);
+    const perPage = Math.min(100, Math.max(1, parseInt(req.query.per_page) || 50));
+    const offset  = (page - 1) * perPage;
+
+    const pending = query(`
+      SELECT b.sl, b.vendor, b.inv_number, b.inv_date, b.total_amount,
+             b.tracker_type,
+             CASE
+               WHEN u.sl IS NULL THEN 'Entry'
+               WHEN COALESCE(u.store_handover_date,'')='' THEN 'Stores'
+               WHEN COALESCE(u.qs_received_date,'')='' THEN 'Doc Control'
+               WHEN COALESCE(u.qs_certified_date,'')='' THEN 'QS Certification'
+               WHEN COALESCE(u.proc_date,'')='' THEN 'Procurement'
+               WHEN COALESCE(u.mgmt_approval_date,'')='' THEN 'Mgmt Approval'
+               WHEN COALESCE(u.accts_jv_date,'')='' THEN 'Accounts'
+               ELSE 'Payment Pending'
+             END AS pending_stage,
+             CAST(julianday('now') - julianday(b.created_at) AS INTEGER) AS age_days
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+        AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')
+      ORDER BY age_days DESC
+      LIMIT ? OFFSET ?`, [...pp, perPage, offset]);
+
+    const total = query(`
+      SELECT COUNT(*) AS cnt FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+        AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')`, pp);
+
+    res.json({
+      ok: true,
+      pending_approvals: pending,
+      pagination: { page, per_page: perPage, total: total[0].cnt }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── CASH FLOW ANALYTICS ──
+
+// GET /api/analytics/cash-flow — projected cash outflow (next 30/60/90 days)
+app.get('/api/analytics/cash-flow', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    // Already paid (last 30/60/90 days)
+    const paid = query(`
+      SELECT
+        SUM(CASE WHEN julianday('now') - julianday(
+          ${normDate('u.payment_date')}) <= 30 THEN COALESCE(u.paid_amount,0) ELSE 0 END) AS paid_30,
+        SUM(CASE WHEN julianday('now') - julianday(
+          ${normDate('u.payment_date')}) <= 60 THEN COALESCE(u.paid_amount,0) ELSE 0 END) AS paid_60,
+        SUM(CASE WHEN julianday('now') - julianday(
+          ${normDate('u.payment_date')}) <= 90 THEN COALESCE(u.paid_amount,0) ELSE 0 END) AS paid_90
+      FROM bills b JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw} AND u.payment_date != ''`, pp);
+
+    // Outstanding balance by age bucket (projected outflow)
+    const outstanding = query(`
+      SELECT
+        SUM(CASE WHEN age <= 30 THEN balance ELSE 0 END)  AS due_30,
+        SUM(CASE WHEN age <= 60 THEN balance ELSE 0 END)  AS due_60,
+        SUM(CASE WHEN age <= 90 THEN balance ELSE 0 END)  AS due_90,
+        SUM(balance) AS total_outstanding
+      FROM (
+        SELECT COALESCE(u.balance_to_pay, b.total_amount) AS balance,
+               CAST(julianday('now') - julianday(
+                 ${normDate('b.inv_date')}) AS INTEGER) AS age
+        FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+        WHERE b.is_deleted=0 ${pw}
+          AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')
+          AND b.inv_date != ''
+      ) t`, pp);
+
+    // Advance recoveries summary
+    const advances = query(`
+      SELECT COALESCE(SUM(COALESCE(u.advance_recovered,0)),0) AS total_advance_recovered
+      FROM bills b JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}`, pp);
+
+    res.json({
+      ok: true,
+      cash_flow: {
+        paid_last_30_days: paid[0].paid_30 || 0,
+        paid_last_60_days: paid[0].paid_60 || 0,
+        paid_last_90_days: paid[0].paid_90 || 0,
+        outstanding_due_30: outstanding[0].due_30 || 0,
+        outstanding_due_60: outstanding[0].due_60 || 0,
+        outstanding_due_90: outstanding[0].due_90 || 0,
+        total_outstanding:  outstanding[0].total_outstanding || 0,
+        total_advance_recovered: advances[0].total_advance_recovered || 0,
+      }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/payment-calendar — bills with due dates
+app.get('/api/analytics/payment-calendar', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    // Unpaid bills sorted by invoice age
+    const calendar = query(`
+      SELECT b.sl, b.vendor, b.inv_number, b.inv_date, b.total_amount,
+             COALESCE(u.balance_to_pay, b.total_amount) AS balance,
+             COALESCE(u.payment_status,'Pending') AS payment_status,
+             COALESCE(u.payment_cert,'') AS payment_cert,
+             CAST(julianday('now') - julianday(
+               ${normDate('b.inv_date')}) AS INTEGER) AS age_days
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+        AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')
+        AND b.inv_date != ''
+      ORDER BY age_days DESC
+      LIMIT 100`, pp);
+
+    res.json({ ok: true, payment_calendar: calendar });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── PO & INVENTORY ANALYTICS ──
+
+// GET /api/analytics/po-utilization — PO utilization rate
+app.get('/api/analytics/po-utilization', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND po.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    const util = query(`
+      SELECT po.po_number, po.vendor, po.po_value, po.status,
+             COALESCE(SUM(b.total_amount),0) AS billed_value,
+             COALESCE(SUM(g.grn_value),0) AS grn_value,
+             po.po_value - COALESCE(SUM(b.total_amount),0) AS balance_po
+      FROM purchase_orders po
+      LEFT JOIN bills b ON b.po_number=po.po_number AND b.is_deleted=0
+      LEFT JOIN grn_entries g ON g.po_number=po.po_number
+      WHERE 1=1 ${pw}
+      GROUP BY po.po_number
+      ORDER BY po.po_value DESC
+      LIMIT 50`, pp);
+
+    const summary = query(`
+      SELECT
+        COUNT(*) AS total_pos,
+        COALESCE(SUM(po.po_value),0) AS total_po_value,
+        COALESCE(SUM(COALESCE(bv.billed,0)),0) AS total_billed,
+        COALESCE(SUM(po.po_value - COALESCE(bv.billed,0)),0) AS total_balance
+      FROM purchase_orders po
+      LEFT JOIN (
+        SELECT po_number, SUM(total_amount) AS billed
+        FROM bills WHERE is_deleted=0
+        GROUP BY po_number
+      ) bv ON bv.po_number=po.po_number
+      WHERE 1=1 ${pw}`, pp);
+
+    res.json({ ok: true, po_utilization: util, summary: summary[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/analytics/stock-overview — stock levels & reorder alerts
+app.get('/api/analytics/stock-overview', (req, res) => {
+  try {
+    const items = query(`
+      SELECT item_code, item_name, category, unit,
+             current_qty, current_value, reorder_qty, last_rate,
+             CASE WHEN reorder_qty>0 AND current_qty<=reorder_qty THEN 1 ELSE 0 END AS needs_reorder
+      FROM stock_items WHERE is_active=1
+      ORDER BY needs_reorder DESC, category ASC, item_name ASC`);
+
+    const summary = query(`
+      SELECT
+        COUNT(*) AS total_items,
+        COUNT(CASE WHEN reorder_qty>0 AND current_qty<=reorder_qty THEN 1 END) AS reorder_alerts,
+        COALESCE(SUM(current_value),0) AS total_stock_value,
+        COUNT(DISTINCT category) AS categories
+      FROM stock_items WHERE is_active=1`);
+
+    res.json({ ok: true, stock_overview: items, summary: summary[0] });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── REPORTS GENERATION ──
+
+// GET /api/reports/bill-summary — bill summary report (JSON, ready for export)
+app.get('/api/reports/bill-summary', (req, res) => {
+  try {
+    const { where, params } = buildBillFilters(req);
+
+    const bills = query(`
+      SELECT b.sl, b.vendor, b.po_number, b.inv_number, b.inv_date,
+             b.basic_amount, b.gst_amount, b.total_amount, b.tracker_type,
+             b.created_at,
+             COALESCE(u.payment_status,'Pending') AS payment_status,
+             COALESCE(u.certified_net,0) AS certified_net,
+             COALESCE(u.paid_amount,0) AS paid_amount,
+             COALESCE(u.balance_to_pay,0) AS balance_to_pay,
+             COALESCE(u.payment_date,'') AS payment_date,
+             COALESCE(u.qs_certified_date,'') AS qs_certified_date,
+             COALESCE(u.tds_deduction,0) AS tds_deduction,
+             COALESCE(u.advance_recovered,0) AS advance_recovered
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE ${where}
+      ORDER BY CAST(b.sl AS REAL) ASC`, params);
+
+    const totals = {
+      total_bills:    bills.length,
+      total_basic:    bills.reduce((s, b) => s + (b.basic_amount || 0), 0),
+      total_gst:      bills.reduce((s, b) => s + (b.gst_amount || 0), 0),
+      total_invoice:  bills.reduce((s, b) => s + (b.total_amount || 0), 0),
+      total_certified:bills.reduce((s, b) => s + (b.certified_net || 0), 0),
+      total_paid:     bills.reduce((s, b) => s + (b.paid_amount || 0), 0),
+      total_balance:  bills.reduce((s, b) => s + (b.balance_to_pay || 0), 0),
+      total_tds:      bills.reduce((s, b) => s + (b.tds_deduction || 0), 0),
+    };
+
+    res.json({ ok: true, report: { bills, totals, generated_at: new Date().toISOString() } });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/reports/vendor-performance — vendor performance report
+app.get('/api/reports/vendor-performance', (req, res) => {
+  try {
+    const { where, params } = buildBillFilters(req);
+
+    const vendors = query(`
+      SELECT b.vendor,
+             COUNT(*) AS total_bills,
+             COALESCE(SUM(b.total_amount),0) AS total_spend,
+             COALESCE(AVG(b.total_amount),0) AS avg_invoice,
+             COALESCE(SUM(COALESCE(u.paid_amount,0)),0) AS total_paid,
+             COALESCE(SUM(COALESCE(u.balance_to_pay,0)),0) AS total_balance,
+             COALESCE(SUM(COALESCE(u.tds_deduction,0)),0) AS total_tds,
+             COUNT(CASE WHEN COALESCE(u.shortage_flag,0)=1 THEN 1 END) AS shortages,
+             COUNT(CASE WHEN COALESCE(u.inspection_status,'')='Rejected' THEN 1 END) AS rejections,
+             COUNT(CASE WHEN COALESCE(u.payment_status,'')='Paid' THEN 1 END) AS paid_count,
+             COALESCE(SUM(b.gst_amount),0) AS total_gst
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE ${where}
+      GROUP BY b.vendor
+      ORDER BY total_spend DESC`, params);
+
+    res.json({
+      ok: true,
+      report: {
+        vendors: vendors.map(v => ({
+          ...v,
+          payment_rate: v.total_bills > 0 ? Math.round((v.paid_count / v.total_bills) * 100) : 0,
+        })),
+        generated_at: new Date().toISOString(),
+      }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/reports/cash-flow-forecast — cash flow forecast report
+app.get('/api/reports/cash-flow-forecast', (req, res) => {
+  try {
+    const pid = req.projectId || 0;
+    const pw  = pid ? 'AND b.project_id=?' : '';
+    const pp  = pid ? [pid] : [];
+
+    const outstanding = query(`
+      SELECT b.sl, b.vendor, b.inv_number, b.inv_date,
+             b.total_amount,
+             COALESCE(u.balance_to_pay, b.total_amount) AS balance,
+             COALESCE(u.certified_net, 0) AS certified,
+             COALESCE(u.payment_status,'Pending') AS payment_status,
+             CAST(julianday('now') - julianday(
+               ${normDate('b.inv_date')}) AS INTEGER) AS age_days
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE b.is_deleted=0 ${pw}
+        AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')
+        AND b.inv_date != ''
+      ORDER BY age_days DESC`, pp);
+
+    const buckets = { due_0_30: 0, due_31_60: 0, due_61_90: 0, due_90_plus: 0 };
+    outstanding.forEach(b => {
+      const age = b.age_days || 0;
+      if (age <= 30)       buckets.due_0_30   += b.balance;
+      else if (age <= 60)  buckets.due_31_60  += b.balance;
+      else if (age <= 90)  buckets.due_61_90  += b.balance;
+      else                 buckets.due_90_plus += b.balance;
+    });
+
+    res.json({
+      ok: true,
+      report: {
+        forecast_buckets: buckets,
+        total_outstanding: outstanding.reduce((s, b) => s + (b.balance || 0), 0),
+        outstanding_bills: outstanding,
+        generated_at: new Date().toISOString(),
+      }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/reports/compliance — compliance report (GST, TDS)
+app.get('/api/reports/compliance', (req, res) => {
+  try {
+    const { where, params } = buildBillFilters(req);
+
+    const gst = query(`
+      SELECT b.vendor, b.inv_number, b.inv_date,
+             b.basic_amount, b.gst_amount, b.total_amount,
+             b.cgst_amt, b.sgst_amt, b.igst_amt,
+             b.cgst_pct, b.sgst_pct, b.igst_pct,
+             COALESCE(u.tds_deduction,0) AS tds_deduction,
+             COALESCE(u.payment_status,'Pending') AS payment_status
+      FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+      WHERE ${where}
+      ORDER BY CAST(b.sl AS REAL) ASC`, params);
+
+    const totals = {
+      total_bills:   gst.length,
+      total_basic:   gst.reduce((s, b) => s + (b.basic_amount || 0), 0),
+      total_cgst:    gst.reduce((s, b) => s + (b.cgst_amt || 0), 0),
+      total_sgst:    gst.reduce((s, b) => s + (b.sgst_amt || 0), 0),
+      total_igst:    gst.reduce((s, b) => s + (b.igst_amt || 0), 0),
+      total_gst:     gst.reduce((s, b) => s + (b.gst_amount || 0), 0),
+      total_tds:     gst.reduce((s, b) => s + (b.tds_deduction || 0), 0),
+    };
+
+    res.json({
+      ok: true,
+      report: { bills: gst, totals, generated_at: new Date().toISOString() }
+    });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// GET /api/reports/export/:type — export report data as JSON (CSV/PDF handled on frontend)
+app.get('/api/reports/export/:type', (req, res) => {
+  try {
+    const type = req.params.type;
+    const { where, params } = buildBillFilters(req);
+    const allowed = ['bills', 'vendors', 'compliance', 'cash-flow'];
+    if (!allowed.includes(type)) {
+      return res.status(400).json({ ok: false, error: 'Invalid export type. Allowed: ' + allowed.join(', ') });
+    }
+
+    let data;
+    if (type === 'bills') {
+      data = query(`
+        SELECT b.sl, b.vendor, b.po_number, b.inv_number, b.inv_date,
+               b.basic_amount, b.gst_amount, b.total_amount, b.tracker_type,
+               b.created_at,
+               COALESCE(u.payment_status,'Pending') AS payment_status,
+               COALESCE(u.certified_net,0) AS certified_net,
+               COALESCE(u.paid_amount,0) AS paid_amount,
+               COALESCE(u.balance_to_pay,0) AS balance_to_pay,
+               COALESCE(u.tds_deduction,0) AS tds_deduction
+        FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+        WHERE ${where}
+        ORDER BY CAST(b.sl AS REAL) ASC`, params);
+    } else if (type === 'vendors') {
+      data = query(`
+        SELECT b.vendor,
+               COUNT(*) AS bill_count,
+               COALESCE(SUM(b.total_amount),0) AS total_spend,
+               COALESCE(SUM(COALESCE(u.paid_amount,0)),0) AS paid,
+               COALESCE(SUM(COALESCE(u.balance_to_pay,0)),0) AS balance
+        FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+        WHERE ${where}
+        GROUP BY b.vendor ORDER BY total_spend DESC`, params);
+    } else if (type === 'compliance') {
+      data = query(`
+        SELECT b.vendor, b.inv_number, b.inv_date, b.basic_amount,
+               b.cgst_amt, b.sgst_amt, b.igst_amt, b.gst_amount,
+               COALESCE(u.tds_deduction,0) AS tds_deduction,
+               COALESCE(u.payment_status,'Pending') AS payment_status
+        FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+        WHERE ${where}
+        ORDER BY CAST(b.sl AS REAL) ASC`, params);
+    } else if (type === 'cash-flow') {
+      const pid = req.projectId || 0;
+      const pw  = pid ? 'AND b.project_id=?' : '';
+      const pp  = pid ? [pid] : [];
+      data = query(`
+        SELECT b.sl, b.vendor, b.inv_number, b.inv_date, b.total_amount,
+               COALESCE(u.balance_to_pay, b.total_amount) AS balance,
+               COALESCE(u.payment_status,'Pending') AS payment_status,
+               CAST(julianday('now') - julianday(
+                 ${normDate('b.inv_date')}) AS INTEGER) AS age_days
+        FROM bills b LEFT JOIN bill_updates u ON b.sl=u.sl
+        WHERE b.is_deleted=0 ${pw}
+          AND COALESCE(u.payment_status,'') NOT IN ('Paid','Cancelled')
+          AND b.inv_date != ''
+        ORDER BY age_days DESC`, pp);
+    }
+
+    res.setHeader('Content-Type', 'application/json');
+    res.json({ ok: true, type, data, count: data.length, exported_at: new Date().toISOString() });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
+
+// ── STOCK-ITEMS SEED ──
+
 // GET /api/stock-items/seed-defaults — seed the 5 starting categories if empty
 app.post('/api/stock-items/seed', (req, res) => {
   try {
