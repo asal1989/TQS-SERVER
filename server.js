@@ -1311,11 +1311,8 @@ app.post('/api/bills/:sl/files', createRateLimiter(60 * 1000, 20), (req, res) =>
 
     // Save file to disk using a server-generated UUID filename (original name stored in DB only)
     const uploadDir = getBillUploadDir(sl);
-    // Derive extension from the validated MIME type — no user input in disk path
-    const MIME_TO_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
-      'image/webp': '.webp', 'application/pdf': '.pdf' };
-    const ext          = MIME_TO_EXT[type] || '';
-    const diskFilename = `${crypto.randomUUID()}${ext}`;
+    // Use UUID only — no user-controlled component in disk path; Content-Type served from DB
+    const diskFilename = crypto.randomUUID();
     const filePath     = path.join(uploadDir, diskFilename);
 
     fs.writeFileSync(filePath, buf);
