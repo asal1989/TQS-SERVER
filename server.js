@@ -1,12 +1,13 @@
 // TQS Bill Tracker — Local Office Server
 // Node.js + Express + sql.js (pure JavaScript SQLite — no Python/compilation needed!)
-const express   = require('express');
-const path      = require('path');
-const fs        = require('fs');
-const os        = require('os');
-const crypto    = require('crypto');
-const initSqlJs = require('sql.js');
-const nodemailer = require('nodemailer');
+const express       = require('express');
+const path          = require('path');
+const fs            = require('fs');
+const os            = require('os');
+const crypto        = require('crypto');
+const initSqlJs     = require('sql.js');
+const nodemailer    = require('nodemailer');
+const rateLimit     = require('express-rate-limit');
 
 const app     = express();
 const PORT    = 3000; // merged PO+WO tracker
@@ -573,6 +574,23 @@ const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000; // 15 minutes
 const ATTEMPT_RESET_MS    = 60 * 60 * 1000; // Reset after 1 hour of inactivity
 
+// Express-level rate limiters (satisfy middleware rate-limiting requirements)
+const loginRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 requests per window per IP (email-based lockout is stricter)
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: 'Too many login attempts, please try again later' }
+});
+
+const uploadRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 30, // 30 uploads per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { ok: false, error: 'Too many file uploads, please slow down' }
+});
+
 function checkLoginAttempts(email) {
   const now = Date.now();
   const attempt = loginAttempts.get(email);
@@ -610,7 +628,7 @@ setInterval(() => {
 }, 30 * 60 * 1000);
 
 // POST /api/auth/login — verify email + password + project, return session token
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginRateLimiter, (req, res) => {
   try {
     const { email, password, project_id } = req.body || {};
     if (!email || !password) {
@@ -1365,7 +1383,7 @@ function validateFileUpload(name, size, type, data) {
 }
 
 // POST /api/bills/:sl/files — upload file → saved to disk + metadata in DB
-app.post('/api/bills/:sl/files', (req, res) => {
+app.post('/api/bills/:sl/files', uploadRateLimiter, (req, res) => {
   try {
     const { sl } = req.params;
     const { name, size, type, data, uploaded_by } = req.body;
