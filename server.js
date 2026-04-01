@@ -1310,8 +1310,11 @@ app.post('/api/bills/:sl/files', createRateLimiter(60 * 1000, 20), (req, res) =>
     if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
     // Save file to disk using a server-generated UUID filename (original name stored in DB only)
-    const uploadDir    = getBillUploadDir(sl);
-    const ext          = path.extname(sanitizeFilename(name)) || '';
+    const uploadDir = getBillUploadDir(sl);
+    // Derive extension from the validated MIME type — no user input in disk path
+    const MIME_TO_EXT = { 'image/jpeg': '.jpg', 'image/png': '.png', 'image/gif': '.gif',
+      'image/webp': '.webp', 'application/pdf': '.pdf' };
+    const ext          = MIME_TO_EXT[type] || '';
     const diskFilename = `${crypto.randomUUID()}${ext}`;
     const filePath     = path.join(uploadDir, diskFilename);
 
