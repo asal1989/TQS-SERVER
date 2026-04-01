@@ -1309,11 +1309,10 @@ app.post('/api/bills/:sl/files', createRateLimiter(60 * 1000, 20), (req, res) =>
     // Ensure uploads directory exists (safety — in case folder was deleted)
     if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-    // Save file to disk: uploads/bills/SL-{sl}/{filename}
-    const safeFilename = sanitizeFilename(name);
+    // Save file to disk using a server-generated UUID filename (original name stored in DB only)
     const uploadDir    = getBillUploadDir(sl);
-    // Add timestamp prefix to avoid collisions
-    const diskFilename = `${Date.now()}_${safeFilename}`;
+    const ext          = path.extname(sanitizeFilename(name)) || '';
+    const diskFilename = `${crypto.randomUUID()}${ext}`;
     const filePath     = path.join(uploadDir, diskFilename);
 
     fs.writeFileSync(filePath, buf);
