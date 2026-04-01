@@ -26,14 +26,40 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   console.log('[Uploads] Created uploads directory:', UPLOADS_DIR);
 }
 
+// File upload security constants
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+const ALLOWED_MIME_TYPES = new Set(['image/jpeg','image/png','image/gif','image/webp','application/pdf']);
+
 // ── SERVER-SIDE SESSIONS ──
 // Tokens are random 32-byte hex strings; sessions expire after 8 hours.
 const sessions = new Map(); // token → { dept, expiresAt }
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const SESSIONS_FILE = path.join(__dirname, 'sessions.json');
 
 function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
+
+// Persist sessions to disk so they survive server restarts
+function saveSessions() {
+  try {
+    const data = {};
+    for (const [tok, s] of sessions) { data[tok] = s; }
+    fs.writeFileSync(SESSIONS_FILE, JSON.stringify(data));
+  } catch (e) { /* non-fatal */ }
+}
+function loadSessions() {
+  try {
+    if (!fs.existsSync(SESSIONS_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+    const now = Date.now();
+    for (const [tok, s] of Object.entries(data)) {
+      if (s.expiresAt > now) sessions.set(tok, s);
+    }
+  } catch (e) { /* ignore corrupt file */ }
+}
+loadSessions();
+setInterval(saveSessions, 60 * 1000); // persist every minute
 
 // Password hashing — scrypt with per-user salt (no extra dependencies)
 function hashPassword(password, salt) {
@@ -46,15 +72,38 @@ function verifyPassword(password, salt, storedHash) {
   } catch { return false; }
 }
 
-// Purge expired sessions every hour
+// Purge expired sessions every hour and persist to disk
 setInterval(() => {
   const now = Date.now();
   for (const [tok, s] of sessions) {
     if (s.expiresAt < now) sessions.delete(tok);
   }
+  saveSessions();
 }, 60 * 60 * 1000);
 
 // Paths that do NOT require a valid session token
+// Brute-force protection: track failed login attempts per email
+const loginAttempts = new Map(); // email → { count, lockedUntil }
+const MAX_LOGIN_ATTEMPTS = 5;
+const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
+
+// Simple in-memory rate limiter: max `limit` requests per IP per `windowMs`
+function createRateLimiter(windowMs, limit) {
+  const hits = new Map(); // ip → { count, resetAt }
+  return function rateLimitMiddleware(req, res, next) {
+    const ip = (req.ip || '').replace(/^::ffff:/, '');
+    const now = Date.now();
+    const entry = hits.get(ip) || { count: 0, resetAt: now + windowMs };
+    if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
+    entry.count++;
+    hits.set(ip, entry);
+    if (entry.count > limit) {
+      return res.status(429).json({ ok: false, error: 'Too many requests. Please slow down.' });
+    }
+    next();
+  };
+}
+
 const AUTH_EXEMPT = new Set(['/auth/login', '/auth/logout', '/auth/me', '/health', '/projects']);
 
 function requireAuth(req, res, next) {
@@ -82,6 +131,15 @@ function sanitizeFilename(name) {
   return path.basename(name).replace(/[^a-zA-Z0-9._\-() ]/g, '_').substring(0, 200);
 }
 
+// Helper: verify a file path is safely inside an allowed directory
+function isSafePath(filePath, allowedDir) {
+  try {
+    const real = fs.realpathSync(filePath);
+    const dir  = fs.realpathSync(allowedDir);
+    return real.startsWith(dir + path.sep) || real === dir;
+  } catch { return false; }
+}
+
 // Helper: get the folder for a specific SL
 function getBillUploadDir(sl) {
   const dir = path.join(UPLOADS_DIR, `SL-${sl}`);
@@ -90,7 +148,13 @@ function getBillUploadDir(sl) {
 }
 
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.get('origin');
+  const ip = (req.ip || '').replace(/^::ffff:/, '');
+  const isLocal = ip === '127.0.0.1' || ip === '::1' ||
+    ip.startsWith('192.168.') || ip.startsWith('10.') ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ip);
+  const allowedOrigin = (!origin || isLocal) ? (origin || '*') : null;
+  if (allowedOrigin) res.header('Access-Control-Allow-Origin', allowedOrigin);
   res.header('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type,X-Auth-Token');
   if (req.method === 'OPTIONS') return res.sendStatus(200);
@@ -120,8 +184,9 @@ function saveDb() {
       console.error('  Recommended: Place it in C:\\TQS-Server\\');
       console.error('  Then re-run START_SERVER.bat from the new location.');
       console.error('═══════════════════════════════════════════════════════');
+      throw new Error('Permission denied writing database. Move the server folder to C:\\TQS-Server\\');
     }
-    throw err;
+    throw new Error('Database write failed: ' + err.message);
   }
 }
 
@@ -329,7 +394,7 @@ async function initDb() {
   try { run("ALTER TABLE purchase_orders ADD COLUMN delivery_address TEXT DEFAULT ''"); } catch(e){}
   try { run("ALTER TABLE purchase_orders ADD COLUMN delivery_contact TEXT DEFAULT ''"); } catch(e){}
   try { run("ALTER TABLE purchase_orders ADD COLUMN narration TEXT DEFAULT ''"); } catch(e){}
-  try { run("ALTER TABLE purchase_orders ADD COLUMN form_no TEXT DEFAULT 'BCIM-PUR-F-03'"); } catch(e){}
+  try { run("ALTER TABLE purchase_orders ADD COLUMN form_no TEXT DEFAULT ''"); } catch(e){}
 
 
   // ── INVENTORY & INDENT TABLES ──────────────────────────────────────────────
@@ -519,6 +584,15 @@ app.post('/api/auth/login', (req, res) => {
     if (!project_id) {
       return res.status(400).json({ ok: false, error: 'Please select a project to continue' });
     }
+
+    // Brute-force check
+    const emailKey = (email || '').toLowerCase().trim();
+    const attempt = loginAttempts.get(emailKey) || { count: 0, lockedUntil: 0 };
+    if (attempt.lockedUntil > Date.now()) {
+      const secs = Math.ceil((attempt.lockedUntil - Date.now()) / 1000);
+      return res.status(429).json({ ok: false, error: `Account locked. Try again in ${secs}s` });
+    }
+
     const projectRows = query('SELECT * FROM projects WHERE id=? AND is_active=1', [project_id]);
     if (!projectRows.length) {
       return res.status(400).json({ ok: false, error: 'Invalid or inactive project' });
@@ -526,8 +600,17 @@ app.post('/api/auth/login', (req, res) => {
     const project = projectRows[0];
     const rows = query('SELECT * FROM users WHERE LOWER(email)=LOWER(?) AND is_active=1', [email.trim()]);
     if (!rows.length || !verifyPassword(password, rows[0].salt, rows[0].password_hash)) {
+      attempt.count++;
+      if (attempt.count >= MAX_LOGIN_ATTEMPTS) {
+        attempt.lockedUntil = Date.now() + LOCKOUT_MS;
+        console.warn(`[Auth] Account locked after ${attempt.count} failed attempts: ${emailKey}`);
+      }
+      loginAttempts.set(emailKey, attempt);
       return res.status(401).json({ ok: false, error: 'Invalid email or password' });
     }
+    // Success — clear failed attempts
+    loginAttempts.delete(emailKey);
+
     const user = rows[0];
     // Check project access (admin can access all projects)
     if (user.dept !== 'admin') {
@@ -542,6 +625,7 @@ app.post('/api/auth/login', (req, res) => {
       projectId: project.id, projectName: project.name,
       expiresAt: Date.now() + SESSION_TTL_MS
     });
+    saveSessions();
     res.json({ ok: true, token, dept: user.dept, name: user.name, email: user.email, userId: user.id,
                projectId: project.id, projectName: project.name });
   } catch (err) {
@@ -793,9 +877,19 @@ app.get('/api/health', (req, res) => {
 app.get('/api/bills', (req, res) => {
   try {
     const trackerType = (req.query.type === 'wo') ? 'wo' : (req.query.type === 'po') ? 'po' : null;
+    const page  = Math.max(1, parseInt(req.query.page)  || 1);
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 200));
+    const offset = (page - 1) * limit;
     const qParams = [req.projectId || 0];
     let typeFilter = '';
     if (trackerType) { typeFilter = 'AND b.tracker_type = ?'; qParams.push(trackerType); }
+
+    const totalRow = query(
+      `SELECT COUNT(*) as total FROM bills b WHERE b.is_deleted = 0 AND b.project_id = ? ${typeFilter}`,
+      qParams
+    );
+    const total = totalRow[0].total;
+
     const bills = query(`
       SELECT b.*, u.store_handover_date, u.store_recv_date, u.store_remarks, u.dc_number, u.vehicle_number, u.inspection_status, u.shortage_flag, u.storage_location, u.received_by,
         u.ho_received_date, u.qs_received_date, u.doc_ctrl_remarks,
@@ -813,7 +907,8 @@ app.get('/api/bills', (req, res) => {
       LEFT JOIN bill_updates u ON b.sl = u.sl
       WHERE b.is_deleted = 0 AND b.project_id = ? ${typeFilter}
       ORDER BY CAST(b.sl AS REAL) ASC
-    `, qParams);
+      LIMIT ? OFFSET ?
+    `, [...qParams, limit, offset]);
     bills.forEach(b => {
       b._hist = query('SELECT dept,action,ts FROM bill_history WHERE sl=? ORDER BY ts DESC LIMIT 20', [b.sl]);
       b._files = query('SELECT id,name,size,type,uploaded_by,uploaded_at FROM bill_files WHERE sl=? ORDER BY uploaded_at ASC', [b.sl]);
@@ -829,7 +924,7 @@ app.get('/api/bills', (req, res) => {
         }
       }
     });
-    res.json({ ok: true, bills });
+    res.json({ ok: true, bills, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ ok: false, error: err.message });
@@ -842,11 +937,23 @@ app.post('/api/bills', (req, res) => {
     const d = req.body;
     if (!d.vendor) return res.status(400).json({ ok: false, error: 'vendor required' });
 
-    // Duplicate invoice number check — skip if ?force=1
+    // Fix 9: Input validation — reject non-numeric or negative amounts
+    for (const field of ['basic_amount', 'gst_amount', 'total_amount', 'credit_note_val']) {
+      if (d[field] !== undefined && d[field] !== null && d[field] !== '') {
+        const val = parseFloat(d[field]);
+        if (isNaN(val) || val < 0) {
+          return res.status(400).json({ ok: false, error: `${field} must be a non-negative number` });
+        }
+      }
+    }
+
+    // Fix 1: Sanitize inputs in JS before duplicate check query
     if (d.inv_number && d.inv_number.trim() && req.query.force !== '1') {
+      const normInv    = d.inv_number.trim().toLowerCase();
+      const normVendor = (d.vendor || '').trim().toLowerCase();
       const dup = query(
-        'SELECT sl FROM bills WHERE LOWER(TRIM(inv_number))=LOWER(TRIM(?)) AND LOWER(TRIM(vendor))=LOWER(TRIM(?)) AND is_deleted=0',
-        [d.inv_number, d.vendor]
+        'SELECT sl FROM bills WHERE LOWER(TRIM(inv_number))=? AND LOWER(TRIM(vendor))=? AND is_deleted=0',
+        [normInv, normVendor]
       );
       if (dup.length) {
         return res.status(409).json({
@@ -858,17 +965,26 @@ app.post('/api/bills', (req, res) => {
       }
     }
 
-    const maxRow = query('SELECT MAX(CAST(sl AS REAL)) as m FROM bills');
-    const sl = String(Math.floor((maxRow[0].m || 0)) + 1);
-    const ttype = d.tracker_type === 'wo' ? 'wo' : 'po';
-    run(`INSERT INTO bills (sl,vendor,po_number,po_date,inv_number,inv_date,inv_month,
-         received_date,basic_amount,gst_amount,total_amount,credit_note_num,credit_note_val,remarks,tracker_type,project_id,is_new)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
-      [sl,d.vendor,d.po_number||'',d.po_date||'',d.inv_number||'',
-       d.inv_date||'',d.inv_month||'',d.received_date||'',
-       d.basic_amount||0,d.gst_amount||0,d.total_amount||0,
-       d.credit_note_num||'',d.credit_note_val||0,d.remarks||'',ttype,
-       req.projectId||0]);
+    // Fix 7: Wrap SL generation in a transaction to prevent race conditions
+    run('BEGIN TRANSACTION');
+    let sl;
+    try {
+      const maxRow = query('SELECT MAX(CAST(sl AS REAL)) as m FROM bills');
+      sl = String(Math.floor((maxRow[0].m || 0)) + 1);
+      const ttype = d.tracker_type === 'wo' ? 'wo' : 'po';
+      run(`INSERT INTO bills (sl,vendor,po_number,po_date,inv_number,inv_date,inv_month,
+           received_date,basic_amount,gst_amount,total_amount,credit_note_num,credit_note_val,remarks,tracker_type,project_id,is_new)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+        [sl,d.vendor,d.po_number||'',d.po_date||'',d.inv_number||'',
+         d.inv_date||'',d.inv_month||'',d.received_date||'',
+         parseFloat(d.basic_amount)||0,parseFloat(d.gst_amount)||0,parseFloat(d.total_amount)||0,
+         d.credit_note_num||'',parseFloat(d.credit_note_val)||0,d.remarks||'',ttype,
+         req.projectId||0]);
+      run('COMMIT');
+    } catch (txErr) {
+      try { run('ROLLBACK'); } catch(e) {}
+      throw txErr;
+    }
     run('INSERT OR IGNORE INTO bill_updates (sl) VALUES (?)', [sl]);
     if (d.dept) run('INSERT INTO bill_history (sl,dept,action) VALUES (?,?,?)', [sl,d.dept,'New bill added']);
     saveDb();
@@ -922,7 +1038,21 @@ app.post('/api/bills/bulk', (req, res) => {
     const maxRow = query('SELECT MAX(CAST(sl AS REAL)) as m FROM bills');
     let nextSL = Math.floor((maxRow[0].m || 0)) + 1;
     let count = 0;
+    const duplicates = [];
     for (const d of bills) {
+      // Fix 13: Detect and skip duplicate invoices during bulk import
+      if (d.inv_number && String(d.inv_number).trim()) {
+        const normInv    = String(d.inv_number).trim().toLowerCase();
+        const normVendor = (d.vendor || '').trim().toLowerCase();
+        const dup = query(
+          'SELECT sl FROM bills WHERE LOWER(TRIM(inv_number))=? AND LOWER(TRIM(vendor))=? AND is_deleted=0',
+          [normInv, normVendor]
+        );
+        if (dup.length) {
+          duplicates.push({ inv_number: d.inv_number, vendor: d.vendor, existing_sl: dup[0].sl });
+          continue;
+        }
+      }
       const sl = String(nextSL++);
       const ttype = d.tracker_type === 'wo' ? 'wo' : 'po';
       // Core bill
@@ -970,7 +1100,7 @@ app.post('/api/bills/bulk', (req, res) => {
       count++;
     }
     saveDb();
-    res.json({ ok: true, imported: count });
+    res.json({ ok: true, imported: count, duplicates_skipped: duplicates.length, duplicates });
   } catch (err) {
     console.error('bulk import:', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -1141,24 +1271,52 @@ app.post('/api/clear-all', (req, res) => {
 });
 
 // POST /api/bills/:sl/files — upload file → saved to disk + metadata in DB
-app.post('/api/bills/:sl/files', (req, res) => {
+app.post('/api/bills/:sl/files', createRateLimiter(60 * 1000, 20), (req, res) => {
   try {
-    const { sl } = req.params;
+    // Sanitize sl to a positive integer to prevent path injection via req.params
+    const sl = String(Math.abs(parseInt(req.params.sl, 10) || 0));
     const { name, size, type, data, uploaded_by } = req.body;
     if (!name || !data) return res.status(400).json({ ok: false, error: 'name and data required' });
+
+    // Fix 5: File upload security — validate size, MIME type, and magic bytes
+    const sizeNum = parseInt(size) || 0;
+    if (sizeNum > MAX_FILE_SIZE_BYTES) {
+      return res.status(413).json({ ok: false, error: `File too large. Maximum allowed size is ${MAX_FILE_SIZE_BYTES / (1024 * 1024)} MB` });
+    }
+    if (type && !ALLOWED_MIME_TYPES.has(type)) {
+      return res.status(400).json({ ok: false, error: `File type "${type}" is not allowed. Allowed types: JPEG, PNG, GIF, WebP, PDF` });
+    }
+
+    const base64 = data.includes(',') ? data.split(',')[1] : data;
+    let buf;
+    try {
+      buf = Buffer.from(base64, 'base64');
+      if (!buf.length) throw new Error('Empty file');
+    } catch (e) {
+      return res.status(400).json({ ok: false, error: 'Invalid file data: ' + e.message });
+    }
+
+    // Magic number check
+    if (type === 'application/pdf' && buf.slice(0, 4).toString('binary') !== '%PDF') {
+      return res.status(400).json({ ok: false, error: 'File content does not match PDF type' });
+    }
+    if (type === 'image/jpeg' && !(buf[0] === 0xFF && buf[1] === 0xD8)) {
+      return res.status(400).json({ ok: false, error: 'File content does not match JPEG type' });
+    }
+    if (type === 'image/png' && buf.slice(0, 4).toString('hex') !== '89504e47') {
+      return res.status(400).json({ ok: false, error: 'File content does not match PNG type' });
+    }
 
     // Ensure uploads directory exists (safety — in case folder was deleted)
     if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 
-    // Save file to disk: uploads/bills/SL-{sl}/{filename}
-    const safeFilename = sanitizeFilename(name);
-    const uploadDir    = getBillUploadDir(sl);
-    // Add timestamp prefix to avoid collisions
-    const diskFilename = `${Date.now()}_${safeFilename}`;
+    // Save file to disk using a server-generated UUID filename (original name stored in DB only)
+    const uploadDir = getBillUploadDir(sl);
+    // Use UUID only — no user-controlled component in disk path; Content-Type served from DB
+    const diskFilename = crypto.randomUUID();
     const filePath     = path.join(uploadDir, diskFilename);
 
-    const base64 = data.includes(',') ? data.split(',')[1] : data;
-    fs.writeFileSync(filePath, Buffer.from(base64, 'base64'));
+    fs.writeFileSync(filePath, buf);
 
     // Store metadata in DB (no raw base64 data — just the path)
     run(`INSERT INTO bill_files (sl,name,size,type,data,file_path,uploaded_by) VALUES (?,?,?,?,?,?,?)`,
@@ -1166,7 +1324,7 @@ app.post('/api/bills/:sl/files', (req, res) => {
     const id = query('SELECT last_insert_rowid() as id')[0].id;
     saveDb();
 
-    console.log(`[Upload] SL#${sl} → ${diskFilename} (${Math.round((size||0)/1024)}KB)`);
+    console.log(`[Upload] SL#${sl} → ${diskFilename} (${Math.round((sizeNum||0)/1024)}KB)`);
     res.json({ ok: true, id, file_path: filePath });
   } catch (err) {
     console.error('file upload:', err.message);
@@ -1183,6 +1341,9 @@ app.get('/api/bills/:sl/files/:id', (req, res) => {
 
     // Prefer disk file
     if (f.file_path && fs.existsSync(f.file_path)) {
+      if (!isSafePath(f.file_path, UPLOADS_DIR)) {
+        return res.status(403).json({ ok: false, error: 'Access denied' });
+      }
       const inline = ['image/jpeg','image/png','image/gif','image/webp','application/pdf'].includes(f.type);
       res.setHeader('Content-Type', f.type || 'application/octet-stream');
       res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${f.name}"`);
@@ -1211,6 +1372,9 @@ app.get('/api/bills/:sl/files/:id/view', (req, res) => {
     if (!rows.length) return res.status(404).send('Not found');
     const f = rows[0];
     if (f.file_path && fs.existsSync(f.file_path)) {
+      if (!isSafePath(f.file_path, UPLOADS_DIR)) {
+        return res.status(403).send('Access denied');
+      }
       res.setHeader('Content-Type', f.type || 'application/octet-stream');
       res.setHeader('Content-Disposition', `inline; filename="${f.name}"`);
       return res.sendFile(f.file_path);
@@ -1473,7 +1637,7 @@ app.get('/', (req, res) => {
 // AUTO-BACKUP
 // ══════════════════════════════════════════════════════
 
-function runAutoBackup() {
+async function runAutoBackup() {
   try {
     const bills    = query('SELECT * FROM bills ORDER BY sl');
     const updates  = query('SELECT * FROM bill_updates ORDER BY sl');
@@ -1543,19 +1707,27 @@ app.get('/api/autobackup/status', (req, res) => {
 });
 
 // POST /api/autobackup/now — trigger manual backup immediately
-app.post('/api/autobackup/now', (req, res) => {
-  res.json(runAutoBackup());
+app.post('/api/autobackup/now', async (req, res) => {
+  res.json(await runAutoBackup());
 });
 
 // GET /api/autobackup/download/:filename — download a saved auto-backup
-app.get('/api/autobackup/download/:filename', (req, res) => {
+app.get('/api/autobackup/download/:filename', createRateLimiter(60 * 1000, 10), (req, res) => {
   try {
-    const filename = path.basename(req.params.filename); // prevent path traversal
+    const filename = path.basename(req.params.filename); // strip any directory components
     if (!filename.startsWith('TQS_AutoBackup_') || !filename.endsWith('.json')) {
       return res.status(400).json({ ok: false, error: 'Invalid filename' });
     }
     const filepath = path.join(BACKUP_DIR, filename);
     if (!fs.existsSync(filepath)) return res.status(404).json({ ok: false, error: 'File not found' });
+
+    // Fix 2: Verify resolved path is inside BACKUP_DIR to prevent path traversal
+    const realFile    = fs.realpathSync(filepath);
+    const realBackDir = fs.realpathSync(BACKUP_DIR);
+    if (!realFile.startsWith(realBackDir + path.sep) && realFile !== realBackDir) {
+      return res.status(400).json({ ok: false, error: 'Invalid filename' });
+    }
+
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.sendFile(filepath);
@@ -1823,7 +1995,7 @@ app.post('/api/po/full', (req, res) => {
        d.status||'Active', d.approved_by||'', d.approval_date||'',
        d.po_req_no||'', d.po_req_date||'', d.approval_no||'',
        d.delivery_address||'', d.delivery_contact||'',
-       d.narration||'', d.form_no||'BCIM-PUR-F-03']);
+       d.narration||'', d.form_no||'']);
 
     // Save items
     items.forEach((it, idx) => {
@@ -1856,13 +2028,13 @@ app.get('/api/po/:po_number/print', (req, res) => {
     const settRows = query('SELECT key,value FROM app_settings');
     const S = {}; settRows.forEach(r => { S[r.key] = r.value; });
 
-    // ── Company defaults ──
-    const coName   = S.company_name   || S.company || 'BCIM ENGINEERING PRIVATE LIMITED';
-    const coWing   = S.company_wing   || '"B" Wing, Divyasree Chambers.';
-    const coAddr   = S.company_addr   || "No. 11, O'Shaugnessy Road, Bangalore - 560025";
-    const coGstin  = S.company_gstin  || '29AAHCB6485A1ZL';
-    const coFooter = S.company_footer || coName + ', ' + coAddr;
-    const formNo   = po.form_no || S.form_no || 'BCIM-PUR-F-03';
+    // ── Company defaults — configured via admin settings, no hardcoded values ──
+    const coName   = S.company_name   || S.company || 'Your Company Name';
+    const coWing   = S.company_wing   || '';
+    const coAddr   = S.company_addr   || '';
+    const coGstin  = S.company_gstin  || '';
+    const coFooter = S.company_footer || (coName + (coAddr ? ', ' + coAddr : ''));
+    const formNo   = po.form_no || S.form_no || '';
 
     // ── Helpers ──
     const fN = v => { const n=parseFloat(v)||0; return n.toLocaleString('en-IN',{maximumFractionDigits:2}); };
@@ -1949,11 +2121,12 @@ app.get('/api/po/:po_number/print', (req, res) => {
         .text(formNo, PW-RM-80, 18, {width:80, align:'right'}).restore();
 
       // Logo box
+      const logoAbbr = S.company_abbr || (coName ? coName.split(/\s+/).map(w=>w[0]).join('').slice(0,4) : '');
       rect(LM, y, 28, 22, null, '#1a5276');
       doc.save().font('Helvetica-Bold').fontSize(14).fillColor('#1a5276')
-        .text('3', LM+2, y+1, {width:24, align:'center'}).restore();
+        .text(logoAbbr ? logoAbbr[0] : '', LM+2, y+1, {width:24, align:'center'}).restore();
       doc.save().font('Helvetica-Bold').fontSize(8).fillColor('#1a5276')
-        .text('BCIM', LM+2, y+12, {width:24, align:'center'}).restore();
+        .text(logoAbbr, LM+2, y+12, {width:24, align:'center'}).restore();
 
       // Company name block
       doc.save().font('Helvetica-Bold').fontSize(8).fillColor('#000')
@@ -2394,9 +2567,24 @@ app.patch('/api/indents/:indent_no/approve', (req, res) => {
     if (!row.length) return res.status(404).json({ ok:false, error:'Indent not found' });
     const current = row[0];
 
-    // Status machine: Pending Stores → Stores Checked → QS Approved → PM Approved → MD Approved → PO Raised → Closed
-    const FLOW = ['Pending Stores','Stores Checked','QS Approved','PM Approved','MD Approved','PO Raised','Closed'];
-    const idx = FLOW.indexOf(current.status);
+    // Fix 14: Workflow state machine — define allowed transitions per status
+    const ALLOWED_TRANSITIONS = {
+      'Pending Stores': ['stores_check', 'reject'],
+      'Stores Checked': ['qs_approve', 'reject'],
+      'QS Approved':    ['pm_approve', 'reject'],
+      'PM Approved':    ['md_approve', 'reject'],
+      'MD Approved':    ['raise_po',   'reject'],
+      'PO Raised':      ['close'],
+      'Rejected':       [],
+      'Closed':         []
+    };
+    const allowed = ALLOWED_TRANSITIONS[current.status] || [];
+    if (!allowed.includes(d.action)) {
+      return res.status(400).json({
+        ok: false,
+        error: `Action "${d.action}" is not allowed from current status "${current.status}"`
+      });
+    }
 
     let sets = [], params = [];
     if (d.action === 'stores_check') {
@@ -2420,11 +2608,12 @@ app.patch('/api/indents/:indent_no/approve', (req, res) => {
     } else if (d.action === 'raise_po') {
       sets = ['status=?','po_number=?'];
       params = ['PO Raised', d.po_number||''];
+    } else if (d.action === 'close') {
+      sets = ['status=?'];
+      params = ['Closed'];
     } else if (d.action === 'reject') {
       sets = ['status=?'];
       params = ['Rejected'];
-    } else {
-      return res.status(400).json({ ok:false, error:'Unknown action' });
     }
 
     sets.push("updated_at=datetime('now','localtime')");
