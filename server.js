@@ -87,6 +87,23 @@ const loginAttempts = new Map(); // email → { count, lockedUntil }
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_MS = 15 * 60 * 1000; // 15 minutes
 
+// Simple in-memory rate limiter: max `limit` requests per IP per `windowMs`
+function createRateLimiter(windowMs, limit) {
+  const hits = new Map(); // ip → { count, resetAt }
+  return function rateLimitMiddleware(req, res, next) {
+    const ip = (req.ip || '').replace(/^::ffff:/, '');
+    const now = Date.now();
+    const entry = hits.get(ip) || { count: 0, resetAt: now + windowMs };
+    if (now > entry.resetAt) { entry.count = 0; entry.resetAt = now + windowMs; }
+    entry.count++;
+    hits.set(ip, entry);
+    if (entry.count > limit) {
+      return res.status(429).json({ ok: false, error: 'Too many requests. Please slow down.' });
+    }
+    next();
+  };
+}
+
 const AUTH_EXEMPT = new Set(['/auth/login', '/auth/logout', '/auth/me', '/health', '/projects']);
 
 function requireAuth(req, res, next) {
@@ -112,6 +129,15 @@ function requireAuth(req, res, next) {
 // Helper: sanitize filename to prevent path traversal
 function sanitizeFilename(name) {
   return path.basename(name).replace(/[^a-zA-Z0-9._\-() ]/g, '_').substring(0, 200);
+}
+
+// Helper: verify a file path is safely inside an allowed directory
+function isSafePath(filePath, allowedDir) {
+  try {
+    const real = fs.realpathSync(filePath);
+    const dir  = fs.realpathSync(allowedDir);
+    return real.startsWith(dir + path.sep) || real === dir;
+  } catch { return false; }
 }
 
 // Helper: get the folder for a specific SL
@@ -1245,7 +1271,7 @@ app.post('/api/clear-all', (req, res) => {
 });
 
 // POST /api/bills/:sl/files — upload file → saved to disk + metadata in DB
-app.post('/api/bills/:sl/files', (req, res) => {
+app.post('/api/bills/:sl/files', createRateLimiter(60 * 1000, 20), (req, res) => {
   try {
     const { sl } = req.params;
     const { name, size, type, data, uploaded_by } = req.body;
@@ -1315,6 +1341,9 @@ app.get('/api/bills/:sl/files/:id', (req, res) => {
 
     // Prefer disk file
     if (f.file_path && fs.existsSync(f.file_path)) {
+      if (!isSafePath(f.file_path, UPLOADS_DIR)) {
+        return res.status(403).json({ ok: false, error: 'Access denied' });
+      }
       const inline = ['image/jpeg','image/png','image/gif','image/webp','application/pdf'].includes(f.type);
       res.setHeader('Content-Type', f.type || 'application/octet-stream');
       res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${f.name}"`);
@@ -1343,6 +1372,9 @@ app.get('/api/bills/:sl/files/:id/view', (req, res) => {
     if (!rows.length) return res.status(404).send('Not found');
     const f = rows[0];
     if (f.file_path && fs.existsSync(f.file_path)) {
+      if (!isSafePath(f.file_path, UPLOADS_DIR)) {
+        return res.status(403).send('Access denied');
+      }
       res.setHeader('Content-Type', f.type || 'application/octet-stream');
       res.setHeader('Content-Disposition', `inline; filename="${f.name}"`);
       return res.sendFile(f.file_path);
@@ -1680,7 +1712,7 @@ app.post('/api/autobackup/now', async (req, res) => {
 });
 
 // GET /api/autobackup/download/:filename — download a saved auto-backup
-app.get('/api/autobackup/download/:filename', (req, res) => {
+app.get('/api/autobackup/download/:filename', createRateLimiter(60 * 1000, 10), (req, res) => {
   try {
     const filename = path.basename(req.params.filename); // strip any directory components
     if (!filename.startsWith('TQS_AutoBackup_') || !filename.endsWith('.json')) {
