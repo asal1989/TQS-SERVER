@@ -1,0 +1,6 @@
+node_modules/
+tqs_erp.db
+backups/
+uploads/
+sessions.json
+*.bat
